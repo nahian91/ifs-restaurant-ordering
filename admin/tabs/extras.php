@@ -1,9 +1,22 @@
 <?php
-if (!defined('ABSPATH')) exit;
+/**
+ * Antalya POS Extra Add-ons Controller & Router
+ *
+ * @package Antalya_POS
+ * @since 6.4
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
 
 function rtpos_view_extras($s = []) {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__('You do not have sufficient permissions to access this page.', 'antalya-pos'));
+    }
+
     global $wpdb;
-    
+
     // Safe fallback for settings & currency if called without parameters
     if (empty($s) && function_exists('rtpos_get_settings')) {
         $s = rtpos_get_settings();
@@ -12,48 +25,82 @@ function rtpos_view_extras($s = []) {
     $t_extras = $wpdb->prefix . 'rtpos_extras';
     $t_menu   = $wpdb->prefix . 'rtpos_menu';
 
-    // Include Delete Handler
-    include_once plugin_dir_path(__FILE__) . 'extras/extra-delete.php';
+    $svg_check = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    $svg_alert = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+
+    // Include Delete Handler Safely
+    $extras_dir = plugin_dir_path(__FILE__) . 'extras/';
+    if (file_exists($extras_dir . 'extra-delete.php')) {
+        include_once $extras_dir . 'extra-delete.php';
+    }
 
     // 1. Handle Save / Update Extra
     if (isset($_POST['rtpos_save_extra']) && !empty($_POST['extra_name'])) {
+        if (isset($_POST['_wpnonce'])) {
+            check_admin_referer('rtpos_save_extra_action');
+        }
+
+        $extra_name  = sanitize_text_field(wp_unslash($_POST['extra_name']));
+        $extra_price = max(0.0, floatval($_POST['extra_price'] ?? 0));
+
         $data = [
-            'name'  => sanitize_text_field($_POST['extra_name']),
-            'price' => floatval($_POST['extra_price'])
+            'name'  => $extra_name,
+            'price' => $extra_price,
         ];
+        $formats = ['%s', '%f'];
 
         if (!empty($_POST['edit_extra_id'])) {
-            $wpdb->update($t_extras, $data, ['id' => intval($_POST['edit_extra_id'])]);
-            echo '<div class="apos-alert ex-alert-flex"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg><span>Extra add-on updated successfully!</span></div>';
+            $edit_id = intval($_POST['edit_extra_id']);
+            $wpdb->update($t_extras, $data, ['id' => $edit_id], $formats, ['%d']);
+            echo '<div class="apos-alert ex-alert-flex">' . $svg_check . '<span>' . esc_html__('Extra add-on updated successfully!', 'antalya-pos') . '</span></div>';
         } else {
-            $wpdb->insert($t_extras, $data);
-            echo '<div class="apos-alert ex-alert-flex"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg><span>New extra add-on created!</span></div>';
+            $exists = $wpdb->get_var(
+                $wpdb->prepare("SELECT id FROM {$t_extras} WHERE name = %s", $extra_name)
+            );
+            if ($exists) {
+                echo '<div class="apos-alert ex-alert-flex" style="background:#fef2f2; border-color:#fecaca; color:#991b1b;">' . $svg_alert . '<span>' . sprintf(
+                    /* translators: %s: extra add-on name */
+                    esc_html__('Extra "%s" already exists!', 'antalya-pos'),
+                    esc_html($extra_name)
+                ) . '</span></div>';
+            } else {
+                $wpdb->insert($t_extras, $data, $formats);
+                echo '<div class="apos-alert ex-alert-flex">' . $svg_check . '<span>' . esc_html__('New extra add-on created!', 'antalya-pos') . '</span></div>';
+            }
         }
     }
 
     // Routing: 'all', 'add', or 'view'
-    $subtab     = isset($_GET['subtab']) ? sanitize_key($_GET['subtab']) : 'all';
-    $edit_extra = null;
-    $view_extra = null;
+    $allowed_subtabs = ['all', 'add', 'view'];
+    $raw_subtab      = isset($_GET['subtab']) ? sanitize_key($_GET['subtab']) : 'all';
+    $subtab          = in_array($raw_subtab, $allowed_subtabs, true) ? $raw_subtab : 'all';
+    $edit_extra      = null;
+    $view_extra      = null;
 
     if (isset($_GET['edit_extra'])) {
-        $edit_extra = $wpdb->get_row($wpdb->prepare("SELECT * FROM $t_extras WHERE id = %d", intval($_GET['edit_extra'])));
-        $subtab     = 'add';
+        $edit_extra = $wpdb->get_row(
+            $wpdb->prepare("SELECT * FROM {$t_extras} WHERE id = %d", intval($_GET['edit_extra']))
+        );
+        $subtab = 'add';
     } elseif (isset($_GET['view_extra'])) {
-        $view_extra = $wpdb->get_row($wpdb->prepare("SELECT * FROM $t_extras WHERE id = %d", intval($_GET['view_extra'])));
-        $subtab     = 'view';
+        $view_extra = $wpdb->get_row(
+            $wpdb->prepare("SELECT * FROM {$t_extras} WHERE id = %d", intval($_GET['view_extra']))
+        );
+        $subtab = 'view';
     }
 
-    $extras    = $wpdb->get_results("SELECT * FROM $t_extras ORDER BY id DESC") ?: [];
-    $all_items = $wpdb->get_results("SELECT id, name, category, price, image_url, extras FROM $t_menu ORDER BY name ASC") ?: [];
+    $extras    = $wpdb->get_results("SELECT * FROM {$t_extras} ORDER BY id DESC") ?: [];
+    $all_items = $wpdb->get_results("SELECT id, name, category, price, image_url, extras FROM {$t_menu} ORDER BY name ASC") ?: [];
 
     // Map full dish objects by extra ID
     $dishes_by_extra = [];
     foreach ($all_items as $itm) {
-        $ids = json_decode($itm->extras, true);
-        if (is_array($ids)) {
-            foreach ($ids as $eid) {
-                $dishes_by_extra[intval($eid)][] = $itm;
+        if (!empty($itm->extras)) {
+            $ids = json_decode($itm->extras, true);
+            if (is_array($ids)) {
+                foreach ($ids as $eid) {
+                    $dishes_by_extra[intval($eid)][] = $itm;
+                }
             }
         }
     }
@@ -73,7 +120,7 @@ function rtpos_view_extras($s = []) {
         .apos-label { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 7px; }
         .apos-label small { font-weight: 500; color: #64748b; font-size: 12px; }
         .apos-input-wrap { position: relative; display: flex; align-items: center; width: 100%; }
-        .apos-input-prefix { position: absolute; left: 14px; font-weight: 800; color: #64748b; font-size: 15px; pointer-events: none; }
+        .apos-input-prefix { position: absolute; left: 14px; font-weight: 800; color: #64748b; font-size: 15px; pointer-events: none; display: inline-flex; align-items: center; }
         .apos-input {
             width: 100%; padding: 11px 15px; border: 1.5px solid #e2e8f0; border-radius: 11px;
             font-size: 14px; font-weight: 500; color: #0f172a; background-color: #f8fafc; box-sizing: border-box;
@@ -115,15 +162,16 @@ function rtpos_view_extras($s = []) {
 
     <div class="ex-full-wrap">
         <?php
-        // Include Sub-Tabs Header
-        include plugin_dir_path(__FILE__) . 'extras/extra-tabs.php';
+        if (file_exists($extras_dir . 'extra-tabs.php')) {
+            include $extras_dir . 'extra-tabs.php';
+        }
 
-        if ($subtab === 'view' && $view_extra) {
-            include plugin_dir_path(__FILE__) . 'extras/extra-view.php';
-        } elseif ($subtab === 'add') {
-            include plugin_dir_path(__FILE__) . 'extras/extra-add-edit.php';
-        } else {
-            include plugin_dir_path(__FILE__) . 'extras/extra-list.php';
+        if ($subtab === 'view' && $view_extra && file_exists($extras_dir . 'extra-view.php')) {
+            include $extras_dir . 'extra-view.php';
+        } elseif ($subtab === 'add' && file_exists($extras_dir . 'extra-add-edit.php')) {
+            include $extras_dir . 'extra-add-edit.php';
+        } elseif (file_exists($extras_dir . 'extra-list.php')) {
+            include $extras_dir . 'extra-list.php';
         }
         ?>
     </div>

@@ -1,7 +1,20 @@
 <?php
-if (!defined('ABSPATH')) exit;
+/**
+ * Antalya POS & Receipt Settings View
+ *
+ * @package Antalya_POS
+ * @since 6.4
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
 
 function rtpos_view_settings($s = []) {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__('You do not have sufficient permissions to access this page.', 'antalya-pos'));
+    }
+
     // Safe fallback for settings if called without parameters
     if (empty($s) && function_exists('rtpos_get_settings')) {
         $s = rtpos_get_settings();
@@ -21,27 +34,33 @@ function rtpos_view_settings($s = []) {
     $svg_copy     = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
 
     if (isset($_POST['rtpos_save_settings'])) {
+        check_admin_referer('rtpos_save_settings_action');
+
+        $tax_input = max(0.0, min(100.0, floatval($_POST['tax_percent'] ?? 0)));
+
         update_option('rtpos_settings', [
-            'restaurant_name' => sanitize_text_field($_POST['restaurant_name']),
-            'phone'           => sanitize_text_field($_POST['phone'] ?? ''),
-            'email'           => sanitize_email($_POST['email'] ?? ''),
-            'currency'        => sanitize_text_field($_POST['currency']),
-            'tax_percent'     => floatval($_POST['tax_percent']),
-            'menu_page_url'   => esc_url_raw($_POST['menu_page_url']),
-            'order_prefix'    => sanitize_text_field($_POST['order_prefix'] ?? 'ORD-'),
-            'receipt_footer'  => sanitize_text_field($_POST['receipt_footer'])
+            'restaurant_name' => sanitize_text_field(wp_unslash($_POST['restaurant_name'] ?? 'Antalya Restaurant')),
+            'phone'           => sanitize_text_field(wp_unslash($_POST['phone'] ?? '')),
+            'email'           => sanitize_email(wp_unslash($_POST['email'] ?? '')),
+            'currency'        => sanitize_text_field(wp_unslash($_POST['currency'] ?? '৳')),
+            'tax_percent'     => $tax_input,
+            'menu_page_url'   => esc_url_raw(wp_unslash($_POST['menu_page_url'] ?? home_url('/menu/'))),
+            'order_prefix'    => sanitize_text_field(wp_unslash($_POST['order_prefix'] ?? 'ORD-')),
+            'receipt_footer'  => sanitize_text_field(wp_unslash($_POST['receipt_footer'] ?? '')),
         ]);
-        echo '<div class="apos-alert set-alert-flex">' . $svg_check . '<span>POS & Receipt settings saved successfully!</span></div>';
+
+        echo '<div class="apos-alert set-alert-flex">' . $svg_check . '<span>' . esc_html__('POS & Receipt settings saved successfully!', 'antalya-pos') . '</span></div>';
     }
 
     $s          = rtpos_get_settings();
     $pages      = get_pages(['sort_column' => 'post_title', 'sort_order' => 'ASC']) ?: [];
     $tax_rate   = floatval($s['tax_percent'] ?? 5);
-    $tax_amt    = (1000 * $tax_rate) / 100;
-    $tot_bill   = 1000 + $tax_amt;
-    $ord_prefix = esc_attr($s['order_prefix'] ?? 'ORD-');
-    $rest_phone = esc_attr($s['phone'] ?? '');
-    $rest_email = esc_attr($s['email'] ?? '');
+    $mock_sub   = 1050.00;
+    $tax_amt    = ($mock_sub * $tax_rate) / 100;
+    $tot_bill   = $mock_sub + $tax_amt;
+    $ord_prefix = $s['order_prefix'] ?? 'ORD-';
+    $rest_phone = $s['phone'] ?? '';
+    $rest_email = $s['email'] ?? '';
     ?>
 
     <style>
@@ -141,14 +160,15 @@ function rtpos_view_settings($s = []) {
         .rc-row-sm { font-size: 11.5px; color: #334155; }
         .rc-row-grand { font-size: 14.5px; font-weight: 900; margin-top: 8px; border-top: 1.5px solid #000; padding-top: 6px; }
         .rc-footer-txt { text-align: center; font-size: 11px; color: #334155; margin-top: 10px; font-style: italic; }
+        .required-star { color: #ef4444; font-weight: 800; margin-left: 3px; }
     </style>
 
     <div class="set-full-wrap">
         <!-- Page Header -->
         <div class="apos-header">
             <div>
-                <h1>POS & Receipt Settings</h1>
-                <p>Configure restaurant branding, currency symbol, VAT/tax rates, and thermal receipt layout.</p>
+                <h1><?php esc_html_e('POS & Receipt Settings', 'antalya-pos'); ?></h1>
+                <p><?php esc_html_e('Configure restaurant branding, currency symbol, VAT/tax rates, and thermal receipt layout.', 'antalya-pos'); ?></p>
             </div>
         </div>
 
@@ -158,14 +178,16 @@ function rtpos_view_settings($s = []) {
                 <div class="apos-form-header">
                     <h3>
                         <span class="set-title-ico"><?php echo $svg_settings; ?></span>
-                        <span>General & Billing Configuration</span>
+                        <span><?php esc_html_e('General & Billing Configuration', 'antalya-pos'); ?></span>
                     </h3>
-                    <p>Update your store preferences below. Changes apply instantly to tablets and printed receipts.</p>
+                    <p><?php esc_html_e('Update your store preferences below. Changes apply instantly to tablets and printed receipts.', 'antalya-pos'); ?></p>
                 </div>
 
                 <form method="post">
+                    <?php wp_nonce_field('rtpos_save_settings_action'); ?>
+
                     <div class="apos-form-group">
-                        <label class="apos-label">Restaurant Name <span>*</span></label>
+                        <label class="apos-label"><?php esc_html_e('Restaurant Name', 'antalya-pos'); ?> <span class="required-star">*</span></label>
                         <div class="apos-input-wrap">
                             <span class="apos-input-prefix"><?php echo $svg_store; ?></span>
                             <input type="text" name="restaurant_name" id="set-rest-name" class="apos-input has-prefix" value="<?php echo esc_attr($s['restaurant_name']); ?>" required>
@@ -174,7 +196,7 @@ function rtpos_view_settings($s = []) {
 
                     <div class="set-two-col">
                         <div class="apos-form-group">
-                            <label class="apos-label">Phone Number <small>(Optional)</small></label>
+                            <label class="apos-label"><?php esc_html_e('Phone Number', 'antalya-pos'); ?> <small><?php esc_html_e('(Optional)', 'antalya-pos'); ?></small></label>
                             <div class="apos-input-wrap">
                                 <span class="apos-input-prefix"><?php echo $svg_phone; ?></span>
                                 <input type="text" name="phone" id="set-phone" class="apos-input has-prefix" value="<?php echo esc_attr($rest_phone); ?>" placeholder="+88017XXXXXXXX">
@@ -182,7 +204,7 @@ function rtpos_view_settings($s = []) {
                         </div>
 
                         <div class="apos-form-group">
-                            <label class="apos-label">Email Address <small>(Optional)</small></label>
+                            <label class="apos-label"><?php esc_html_e('Email Address', 'antalya-pos'); ?> <small><?php esc_html_e('(Optional)', 'antalya-pos'); ?></small></label>
                             <div class="apos-input-wrap">
                                 <span class="apos-input-prefix"><?php echo $svg_email; ?></span>
                                 <input type="email" name="email" id="set-email" class="apos-input has-prefix" value="<?php echo esc_attr($rest_email); ?>" placeholder="info@restaurant.com">
@@ -191,15 +213,15 @@ function rtpos_view_settings($s = []) {
                     </div>
 
                     <div class="apos-form-group">
-                        <label class="apos-label">Tablet Menu Page URL <span>*</span> <small>(Page with [restaurant_menu])</small></label>
+                        <label class="apos-label"><?php esc_html_e('Tablet Menu Page URL', 'antalya-pos'); ?> <span class="required-star">*</span> <small><?php esc_html_e('(Page with [restaurant_menu])', 'antalya-pos'); ?></small></label>
                         <div class="set-url-row">
                             <div class="apos-input-wrap set-url-wrap">
                                 <span class="apos-input-prefix"><?php echo $svg_link; ?></span>
-                                <input type="url" name="menu_page_url" id="set-menu-url" class="apos-input has-prefix" value="<?php echo esc_attr($s['menu_page_url']); ?>" required>
+                                <input type="url" name="menu_page_url" id="set-menu-url" class="apos-input has-prefix" value="<?php echo esc_url($s['menu_page_url']); ?>" required>
                             </div>
                             <?php if (!empty($pages)) : ?>
-                                <select id="set-page-picker" class="apos-input set-page-select">
-                                    <option value="">Pick WP Page...</option>
+                                <select id="set-page-picker" class="apos-input set-page-select" aria-label="<?php esc_attr_e('Pick WordPress Page', 'antalya-pos'); ?>">
+                                    <option value=""><?php esc_html_e('Pick WP Page...', 'antalya-pos'); ?></option>
                                     <?php foreach ($pages as $pg) : ?>
                                         <option value="<?php echo esc_url(get_permalink($pg->ID)); ?>"><?php echo esc_html($pg->post_title); ?></option>
                                     <?php endforeach; ?>
@@ -210,7 +232,7 @@ function rtpos_view_settings($s = []) {
 
                     <div class="set-two-col">
                         <div class="apos-form-group">
-                            <label class="apos-label">Currency Symbol <span>*</span></label>
+                            <label class="apos-label"><?php esc_html_e('Currency Symbol', 'antalya-pos'); ?> <span class="required-star">*</span></label>
                             <div class="apos-input-wrap">
                                 <span class="apos-input-prefix"><?php echo $svg_coins; ?></span>
                                 <input type="text" name="currency" id="set-currency" class="apos-input has-prefix" value="<?php echo esc_attr($s['currency']); ?>" required>
@@ -218,7 +240,7 @@ function rtpos_view_settings($s = []) {
                         </div>
 
                         <div class="apos-form-group">
-                            <label class="apos-label">VAT / Tax Rate (%) <small>(0 for no tax)</small></label>
+                            <label class="apos-label"><?php esc_html_e('VAT / Tax Rate (%)', 'antalya-pos'); ?> <small><?php esc_html_e('(0 for no tax)', 'antalya-pos'); ?></small></label>
                             <div class="apos-input-wrap">
                                 <span class="apos-input-prefix">%</span>
                                 <input type="number" step="0.01" min="0" max="100" name="tax_percent" id="set-tax" class="apos-input has-prefix" value="<?php echo esc_attr($s['tax_percent']); ?>">
@@ -227,33 +249,33 @@ function rtpos_view_settings($s = []) {
                     </div>
 
                     <div class="apos-form-group">
-                        <label class="apos-label">Order ID Prefix <small>(e.g. ORD-, #)</small></label>
+                        <label class="apos-label"><?php esc_html_e('Order ID Prefix', 'antalya-pos'); ?> <small><?php esc_html_e('(e.g. ORD-, #)', 'antalya-pos'); ?></small></label>
                         <div class="apos-input-wrap">
                             <span class="apos-input-prefix"><?php echo $svg_hash; ?></span>
-                            <input type="text" name="order_prefix" id="set-prefix" class="apos-input has-prefix" value="<?php echo esc_attr($s['order_prefix'] ?? 'ORD-'); ?>" placeholder="ORD-" required>
+                            <input type="text" name="order_prefix" id="set-prefix" class="apos-input has-prefix" value="<?php echo esc_attr($ord_prefix); ?>" placeholder="ORD-" required>
                         </div>
                     </div>
 
                     <div class="apos-form-group">
-                        <label class="apos-label">Receipt Footer Message</label>
+                        <label class="apos-label"><?php esc_html_e('Receipt Footer Message', 'antalya-pos'); ?></label>
                         <div class="apos-input-wrap">
                             <span class="apos-input-prefix"><?php echo $svg_msg; ?></span>
-                            <input type="text" name="receipt_footer" id="set-footer" class="apos-input has-prefix" value="<?php echo esc_attr($s['receipt_footer']); ?>" placeholder="Thank you for dining with us!">
+                            <input type="text" name="receipt_footer" id="set-footer" class="apos-input has-prefix" value="<?php echo esc_attr($s['receipt_footer']); ?>" placeholder="<?php esc_attr_e('Thank you for dining with us!', 'antalya-pos'); ?>">
                         </div>
                     </div>
 
                     <div class="set-form-footer">
                         <button type="submit" name="rtpos_save_settings" class="apos-btn set-btn-icon">
                             <?php echo $svg_check; ?>
-                            <span>Save Configuration</span>
+                            <span><?php esc_html_e('Save Configuration', 'antalya-pos'); ?></span>
                         </button>
 
                         <div class="set-sc-box">
-                            <span class="set-sc-lbl">Shortcode:</span>
+                            <span class="set-sc-lbl"><?php esc_html_e('Shortcode:', 'antalya-pos'); ?></span>
                             <code id="rtpos-sc-text" class="set-sc-code">[restaurant_menu]</code>
                             <button type="button" id="rtpos-copy-sc" class="apos-btn-secondary set-btn-icon set-copy-btn">
                                 <?php echo $svg_copy; ?>
-                                <span>Copy</span>
+                                <span><?php esc_html_e('Copy', 'antalya-pos'); ?></span>
                             </button>
                         </div>
                     </div>
@@ -265,7 +287,7 @@ function rtpos_view_settings($s = []) {
                 <div class="set-preview-head">
                     <span class="set-preview-badge">
                         <?php echo $svg_receipt; ?>
-                        <span>Professional Thermal Receipt Preview</span>
+                        <span><?php esc_html_e('Professional Thermal Receipt Preview', 'antalya-pos'); ?></span>
                     </span>
                 </div>
 
@@ -273,20 +295,28 @@ function rtpos_view_settings($s = []) {
                     <div class="rc-center">
                         <h3 id="prev-rest-name" class="rc-rest-title"><?php echo esc_html($s['restaurant_name']); ?></h3>
                         <div id="prev-rest-contact" class="rc-meta-line" style="font-size:10px;">
-                            <?php if (!empty($rest_phone)) echo 'Phone: ' . esc_html($rest_phone); ?>
-                            <?php if (!empty($rest_phone) && !empty($rest_email)) echo ' | '; ?>
-                            <?php if (!empty($rest_email)) echo esc_html($rest_email); ?>
+                            <?php
+                            if (!empty($rest_phone) && !empty($rest_email)) {
+                                echo esc_html('Phone: ' . $rest_phone . ' | ' . $rest_email);
+                            } elseif (!empty($rest_phone)) {
+                                echo esc_html('Phone: ' . $rest_phone);
+                            } elseif (!empty($rest_email)) {
+                                echo esc_html($rest_email);
+                            }
+                            ?>
                         </div>
-                        <div class="rc-invoice-sub">*** CUSTOMER TAX INVOICE ***</div>
-                        <div class="rc-meta-line">Table: <strong>Table 01</strong> | Order: <strong id="prev-order-id"><?php echo $ord_prefix; ?>104</strong></div>
-                        <div class="rc-meta-line" style="font-size:9.5px; color:#555;"><?php echo date('M d, Y • h:i A'); ?></div>
+                        <div class="rc-invoice-sub"><?php esc_html_e('*** CUSTOMER TAX INVOICE ***', 'antalya-pos'); ?></div>
+                        <div class="rc-meta-line">
+                            <?php esc_html_e('Table:', 'antalya-pos'); ?> <strong>Table 01</strong> | <?php esc_html_e('Order:', 'antalya-pos'); ?> <strong id="prev-order-id"><?php echo esc_html($ord_prefix); ?>104</strong>
+                        </div>
+                        <div class="rc-meta-line" style="font-size:9.5px; color:#555;"><?php echo esc_html(date('M d, Y • h:i A', current_time('timestamp'))); ?></div>
                     </div>
 
                     <hr class="rc-hr">
 
                     <div class="rc-table-hdr">
-                        <span>ITEM DESCRIPTION</span>
-                        <span>TOTAL</span>
+                        <span><?php esc_html_e('ITEM DESCRIPTION', 'antalya-pos'); ?></span>
+                        <span><?php esc_html_e('TOTAL', 'antalya-pos'); ?></span>
                     </div>
 
                     <div class="rc-row rc-row-mb">
@@ -305,30 +335,30 @@ function rtpos_view_settings($s = []) {
                     <hr class="rc-hr">
 
                     <div class="rc-row rc-row-sm rc-row-mb">
-                        <span>Subtotal:</span>
+                        <span><?php esc_html_e('Subtotal:', 'antalya-pos'); ?></span>
                         <span><span class="prev-cur"><?php echo esc_html($s['currency']); ?></span>1,050.00</span>
                     </div>
                     <div class="rc-row rc-row-sm rc-row-mb">
-                        <span>VAT / Tax (<span id="prev-tax-rate"><?php echo esc_html($tax_rate); ?></span>%):</span>
-                        <span><span class="prev-cur"><?php echo esc_html($s['currency']); ?></span><span id="prev-tax-amt"><?php echo number_format($tax_amt, 2); ?></span></span>
+                        <span><?php esc_html_e('VAT / Tax', 'antalya-pos'); ?> (<span id="prev-tax-rate"><?php echo esc_html($tax_rate); ?></span>%):</span>
+                        <span><span class="prev-cur"><?php echo esc_html($s['currency']); ?></span><span id="prev-tax-amt"><?php echo esc_html(number_format($tax_amt, 2)); ?></span></span>
                     </div>
-                    
+
                     <!-- Payable, Payment Method & Return -->
                     <div class="rc-row rc-row-grand rc-row-mb">
-                        <span>TOTAL PAYABLE:</span>
-                        <span><span class="prev-cur"><?php echo esc_html($s['currency']); ?></span><span id="prev-grand-total"><?php echo number_format($tot_bill, 2); ?></span></span>
+                        <span><?php esc_html_e('TOTAL PAYABLE:', 'antalya-pos'); ?></span>
+                        <span><span class="prev-cur"><?php echo esc_html($s['currency']); ?></span><span id="prev-grand-total"><?php echo esc_html(number_format($tot_bill, 2)); ?></span></span>
                     </div>
                     <div class="rc-row rc-row-sm rc-row-mb" style="border-top: 1px dotted #64748b; padding-top: 4px; margin-top: 4px;">
-                        <span>Payment Method:</span>
+                        <span><?php esc_html_e('Payment Method:', 'antalya-pos'); ?></span>
                         <strong>CASH</strong>
                     </div>
                     <div class="rc-row rc-row-sm rc-row-mb">
-                        <span>Cash Tendered:</span>
+                        <span><?php esc_html_e('Cash Tendered:', 'antalya-pos'); ?></span>
                         <span><span class="prev-cur"><?php echo esc_html($s['currency']); ?></span>1,200.00</span>
                     </div>
                     <div class="rc-row rc-row-sm rc-row-bold" style="color: #047857;">
-                        <span>CHANGE / RETURN:</span>
-                        <span><span class="prev-cur"><?php echo esc_html($s['currency']); ?></span>150.00</span>
+                        <span><?php esc_html_e('CHANGE / RETURN:', 'antalya-pos'); ?></span>
+                        <span><span class="prev-cur"><?php echo esc_html($s['currency']); ?></span><span id="prev-change-amt"><?php echo esc_html(number_format(max(0, 1200 - $tot_bill), 2)); ?></span></span>
                     </div>
 
                     <hr class="rc-hr">
@@ -343,21 +373,27 @@ function rtpos_view_settings($s = []) {
 
     <script>
     jQuery(document).ready(function($) {
-        let copySvg  = <?php echo json_encode($svg_copy); ?>;
-        let checkSvg = <?php echo json_encode($svg_check); ?>;
+        let copySvg   = <?php echo wp_json_encode($svg_copy); ?>;
+        let checkSvg  = <?php echo wp_json_encode($svg_check); ?>;
+        let copiedTxt = <?php echo wp_json_encode(__('Copied', 'antalya-pos')); ?>;
+        let copyTxt   = <?php echo wp_json_encode(__('Copy', 'antalya-pos')); ?>;
 
         // Auto-fill URL when selecting a WP Page
         $('#set-page-picker').on('change', function() {
             let url = $(this).val();
-            if (url) $('#set-menu-url').val(url);
+            if (url) {
+                $('#set-menu-url').val(url);
+            }
         });
 
         // Copy Shortcode
         $('#rtpos-copy-sc').on('click', function() {
             navigator.clipboard.writeText($('#rtpos-sc-text').text());
             let btn = $(this);
-            btn.html(checkSvg + '<span>Copied</span>');
-            setTimeout(() => btn.html(copySvg + '<span>Copy</span>'), 1800);
+            btn.html(checkSvg + '<span>' + copiedTxt + '</span>');
+            setTimeout(function() {
+                btn.html(copySvg + '<span>' + copyTxt + '</span>');
+            }, 1800);
         });
 
         // Live Professional Receipt Preview Updates
@@ -381,12 +417,15 @@ function rtpos_view_settings($s = []) {
             $('#prev-order-id').text(pfx + '104');
         });
         $('#set-tax').on('input', function() {
-            let rate = parseFloat($(this).val()) || 0;
-            let tax  = (1000 * rate) / 100;
-            let tot  = 1000 + tax;
+            let rate   = parseFloat($(this).val()) || 0;
+            let sub    = 1050.00;
+            let tax    = (sub * rate) / 100;
+            let tot    = sub + tax;
+            let change = Math.max(0, 1200.00 - tot);
             $('#prev-tax-rate').text(rate);
             $('#prev-tax-amt').text(tax.toFixed(2));
             $('#prev-grand-total').text(tot.toFixed(2));
+            $('#prev-change-amt').text(change.toFixed(2));
         });
         $('#set-footer').on('input', function() {
             $('#prev-footer').text($(this).val() || 'Thank you!');

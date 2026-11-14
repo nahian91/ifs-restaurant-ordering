@@ -1,5 +1,18 @@
 <?php
-if (!defined('ABSPATH')) exit;
+/**
+ * Antalya POS Single Order Invoice & Details View
+ *
+ * @package Antalya_POS
+ * @since 6.4
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+if (!current_user_can('manage_options')) {
+    wp_die(esc_html__('You do not have sufficient permissions to access this page.', 'antalya-pos'));
+}
 
 // Safe fallback for currency if not passed from main settings
 if (!isset($cur)) {
@@ -15,16 +28,30 @@ $svg_clock   = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stro
 $svg_table   = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 10h16M6 10v8M18 10v8M9 14h6"/></svg>';
 $svg_back    = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>';
 
-$v_items  = json_decode($view_order->items, true) ?: [];
+$ord_id   = intval($view_order->id);
+$v_items  = json_decode($view_order->items, true);
+if (!is_array($v_items)) {
+    $v_items = [];
+}
 $st_class = 'ord-st-' . sanitize_html_class($view_order->status);
+
+$base_orders_url = admin_url('admin.php?page=antalya-pos&tab=orders');
+$back_url        = esc_url($base_orders_url);
+$edit_url        = esc_url(add_query_arg(['view_order' => $ord_id, 'edit_order' => 1], $base_orders_url));
+
+// Nonce-protected status redirect base URL
+$status_base_url = wp_nonce_url(
+    add_query_arg(['view_order' => $ord_id, 'order_id' => $ord_id], $base_orders_url),
+    'rtpos_order_status_' . $ord_id
+) . '&set_status=';
 ?>
 
 <div class="ord-view-pro-shell">
     <!-- Back to Orders Bar -->
     <div class="ord-back-bar">
-        <a href="?page=antalya-pos&tab=orders" class="ord-back-link">
+        <a href="<?php echo $back_url; ?>" class="ord-back-link">
             <?php echo $svg_back; ?>
-            <span>Back to Orders List</span>
+            <span><?php esc_html_e('Back to Orders List', 'antalya-pos'); ?></span>
         </a>
     </div>
 
@@ -34,37 +61,51 @@ $st_class = 'ord-st-' . sanitize_html_class($view_order->status);
             <div class="ord-pro-meta">
                 <span class="ord-pro-meta-date">
                     <?php echo $svg_clock; ?>
-                    <span>PLACED ON <?php echo esc_html(strtoupper(date('M d, Y • h:i A', strtotime($view_order->created_at)))); ?></span>
+                    <span>
+                        <?php
+                        printf(
+                            /* translators: %s: formatted order date and time */
+                            esc_html__('PLACED ON %s', 'antalya-pos'),
+                            esc_html(strtoupper(date('M d, Y • h:i A', strtotime($view_order->created_at))))
+                        );
+                        ?>
+                    </span>
                 </span>
             </div>
             <h2 class="ord-pro-title">
-                Order #<?php echo intval($view_order->id); ?>
+                <?php
+                printf(
+                    /* translators: %d: order ID */
+                    esc_html__('Order #%d', 'antalya-pos'),
+                    $ord_id
+                );
+                ?>
             </h2>
         </div>
 
         <div class="ord-pro-controls">
-            <div class="ord-select-wrapper" style="width: 190px;">
-                <select class="ord-status-select <?php echo esc_attr($st_class); ?> js-ord-status-select" data-redirect="?page=antalya-pos&tab=orders&view_order=<?php echo intval($view_order->id); ?>&order_id=<?php echo intval($view_order->id); ?>&set_status=">
-                    <option value="pending" <?php selected($view_order->status, 'pending'); ?>>Status: Pending</option>
-                    <option value="preparing" <?php selected($view_order->status, 'preparing'); ?>>Status: Cooking</option>
-                    <option value="served" <?php selected($view_order->status, 'served'); ?>>Status: Served</option>
-                    <option value="completed" <?php selected($view_order->status, 'completed'); ?>>Status: Paid / Done</option>
+            <div class="ord-select-wrapper" style="width: 195px;">
+                <select class="ord-status-select <?php echo esc_attr($st_class); ?> js-ord-status-select" data-redirect="<?php echo esc_url($status_base_url); ?>">
+                    <option value="pending" <?php selected($view_order->status, 'pending'); ?>><?php esc_html_e('Status: Pending', 'antalya-pos'); ?></option>
+                    <option value="preparing" <?php selected($view_order->status, 'preparing'); ?>><?php esc_html_e('Status: Cooking', 'antalya-pos'); ?></option>
+                    <option value="served" <?php selected($view_order->status, 'served'); ?>><?php esc_html_e('Status: Served', 'antalya-pos'); ?></option>
+                    <option value="completed" <?php selected($view_order->status, 'completed'); ?>><?php esc_html_e('Status: Paid / Done', 'antalya-pos'); ?></option>
                 </select>
             </div>
 
-            <a href="?page=antalya-pos&tab=orders&view_order=<?php echo intval($view_order->id); ?>&edit_order=1" class="ord-pro-btn ord-pro-btn-secondary">
+            <a href="<?php echo $edit_url; ?>" class="ord-pro-btn ord-pro-btn-secondary">
                 <?php echo $svg_edit; ?>
-                <span>Edit Order</span>
+                <span><?php esc_html_e('Edit Order', 'antalya-pos'); ?></span>
             </a>
 
-            <button type="button" class="ord-pro-btn ord-pro-btn-dark rtpos-print-kot" data-order='<?php echo esc_attr(wp_json_encode($view_order)); ?>'>
+            <button type="button" class="ord-pro-btn ord-pro-btn-dark rtpos-print-kot" data-order="<?php echo esc_attr(wp_json_encode($view_order)); ?>">
                 <?php echo $svg_print; ?>
-                <span>Print KOT</span>
+                <span><?php esc_html_e('Print KOT', 'antalya-pos'); ?></span>
             </button>
 
-            <button type="button" class="ord-pro-btn ord-pro-btn-primary rtpos-print-bill" data-order='<?php echo esc_attr(wp_json_encode($view_order)); ?>'>
+            <button type="button" class="ord-pro-btn ord-pro-btn-primary rtpos-print-bill" data-order="<?php echo esc_attr(wp_json_encode($view_order)); ?>">
                 <?php echo $svg_receipt; ?>
-                <span>Customer Bill</span>
+                <span><?php esc_html_e('Customer Bill', 'antalya-pos'); ?></span>
             </button>
         </div>
     </div>
@@ -72,21 +113,21 @@ $st_class = 'ord-st-' . sanitize_html_class($view_order->status);
     <!-- Quick Stats Cards Pro -->
     <div class="ord-pro-stats-grid">
         <div class="ord-pro-stat-card stat-border-orange">
-            <div class="ord-pro-stat-lbl">Assigned Table</div>
+            <div class="ord-pro-stat-lbl"><?php esc_html_e('Assigned Table', 'antalya-pos'); ?></div>
             <div class="ord-pro-stat-val">
                 <?php echo $svg_table; ?>
-                <span>Table <?php echo esc_html($view_order->table_no); ?></span>
+                <span><?php esc_html_e('Table', 'antalya-pos'); ?> <?php echo esc_html($view_order->table_no); ?></span>
             </div>
         </div>
 
         <div class="ord-pro-stat-card stat-border-blue">
-            <div class="ord-pro-stat-lbl">Current Status</div>
+            <div class="ord-pro-stat-lbl"><?php esc_html_e('Current Status', 'antalya-pos'); ?></div>
             <div class="ord-pro-stat-val ord-stat-val-status"><?php echo esc_html($view_order->status); ?></div>
         </div>
 
         <div class="ord-pro-stat-card stat-border-green">
-            <div class="ord-pro-stat-lbl">Total Payable Amount</div>
-            <div class="ord-pro-stat-val ord-stat-val-total"><?php echo $cur . number_format($view_order->total_amount, 2); ?></div>
+            <div class="ord-pro-stat-lbl"><?php esc_html_e('Total Payable Amount', 'antalya-pos'); ?></div>
+            <div class="ord-pro-stat-val ord-stat-val-total"><?php echo $cur . esc_html(number_format((float) $view_order->total_amount, 2)); ?></div>
         </div>
     </div>
 
@@ -94,48 +135,48 @@ $st_class = 'ord-st-' . sanitize_html_class($view_order->status);
     <?php if (!empty($view_order->note)) : ?>
         <div class="ord-pro-note-box">
             <?php echo $svg_note; ?>
-            <div><strong>Special Kitchen Note:</strong> <?php echo esc_html($view_order->note); ?></div>
+            <div><strong><?php esc_html_e('Special Kitchen Note:', 'antalya-pos'); ?></strong> <?php echo esc_html($view_order->note); ?></div>
         </div>
     <?php endif; ?>
 
     <!-- Itemized Breakdown Table Pro Container -->
     <div class="ord-pro-content-box">
-        <h3 class="ord-pro-sec-title">Itemized Order Breakdown</h3>
+        <h3 class="ord-pro-sec-title"><?php esc_html_e('Itemized Order Breakdown', 'antalya-pos'); ?></h3>
         <div class="ord-pro-table-wrapper">
             <table class="apos-table apos-full-table ord-pro-items-table">
                 <thead>
                     <tr>
-                        <th style="padding: 14px 18px;">Dish / Item Name</th>
-                        <th style="padding: 14px 18px;">Selected Add-ons / Extras</th>
-                        <th style="padding: 14px 18px; width: 140px;">Unit Price</th>
-                        <th style="padding: 14px 18px; width: 90px;">Qty</th>
-                        <th style="padding: 14px 18px; width: 150px; text-align: right;">Line Total</th>
+                        <th style="padding: 14px 18px;"><?php esc_html_e('Dish / Item Name', 'antalya-pos'); ?></th>
+                        <th style="padding: 14px 18px;"><?php esc_html_e('Selected Add-ons / Extras', 'antalya-pos'); ?></th>
+                        <th style="padding: 14px 18px; width: 140px;"><?php esc_html_e('Unit Price', 'antalya-pos'); ?></th>
+                        <th style="padding: 14px 18px; width: 90px;"><?php esc_html_e('Qty', 'antalya-pos'); ?></th>
+                        <th style="padding: 14px 18px; width: 150px; text-align: right;"><?php esc_html_e('Line Total', 'antalya-pos'); ?></th>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($v_items as $vi) : 
+                    <?php foreach ($v_items as $vi) :
                         $u_price = floatval($vi['unitPrice'] ?? $vi['price'] ?? 0);
                         $qty     = intval($vi['qty'] ?? 1);
                         $l_total = $u_price * $qty;
                     ?>
                     <tr class="ord-pro-item-row">
                         <td style="padding: 14px 18px; vertical-align: middle;">
-                            <strong class="ord-pro-dish-name"><?php echo esc_html($vi['name']); ?></strong>
+                            <strong class="ord-pro-dish-name"><?php echo esc_html($vi['name'] ?? ''); ?></strong>
                         </td>
                         <td style="padding: 14px 18px; vertical-align: middle;">
-                            <?php if (!empty($vi['extras'])) : ?>
+                            <?php if (!empty($vi['extras']) && is_array($vi['extras'])) : ?>
                                 <div class="ord-pro-addons-list">
                                     <?php foreach ($vi['extras'] as $ex) : ?>
                                         <span class="ord-pro-addon-pill">+ <?php echo esc_html($ex); ?></span>
                                     <?php endforeach; ?>
                                 </div>
                             <?php else : ?>
-                                <span class="ord-pro-no-addons">None</span>
+                                <span class="ord-pro-no-addons"><?php esc_html_e('None', 'antalya-pos'); ?></span>
                             <?php endif; ?>
                         </td>
-                        <td style="padding: 14px 18px; vertical-align: middle;"><span class="ord-mono"><?php echo $cur . number_format($u_price, 2); ?></span></td>
+                        <td style="padding: 14px 18px; vertical-align: middle;"><span class="ord-mono"><?php echo $cur . esc_html(number_format($u_price, 2)); ?></span></td>
                         <td style="padding: 14px 18px; vertical-align: middle;"><strong class="ord-pro-qty-badge"><?php echo $qty; ?>×</strong></td>
-                        <td style="padding: 14px 18px; vertical-align: middle; text-align: right;"><strong class="ord-mono ord-pro-line-tot"><?php echo $cur . number_format($l_total, 2); ?></strong></td>
+                        <td style="padding: 14px 18px; vertical-align: middle; text-align: right;"><strong class="ord-mono ord-pro-line-tot"><?php echo $cur . esc_html(number_format($l_total, 2)); ?></strong></td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -145,16 +186,16 @@ $st_class = 'ord-st-' . sanitize_html_class($view_order->status);
         <!-- Final Invoice Totals Summary Box Pro -->
         <div class="ord-pro-totals-card">
             <div class="ord-pro-tot-row">
-                <span>Subtotal</span>
-                <strong class="ord-mono"><?php echo $cur . number_format($view_order->subtotal, 2); ?></strong>
+                <span><?php esc_html_e('Subtotal', 'antalya-pos'); ?></span>
+                <strong class="ord-mono"><?php echo $cur . esc_html(number_format((float) $view_order->subtotal, 2)); ?></strong>
             </div>
             <div class="ord-pro-tot-tax">
-                <span>VAT / Tax Included</span>
-                <strong class="ord-mono"><?php echo $cur . number_format($view_order->tax_amount, 2); ?></strong>
+                <span><?php esc_html_e('VAT / Tax Included', 'antalya-pos'); ?></span>
+                <strong class="ord-mono"><?php echo $cur . esc_html(number_format((float) $view_order->tax_amount, 2)); ?></strong>
             </div>
             <div class="ord-pro-tot-grand">
-                <span>Total Payable</span>
-                <span class="ord-pro-tot-grand-val ord-mono"><?php echo $cur . number_format($view_order->total_amount, 2); ?></span>
+                <span><?php esc_html_e('Total Payable', 'antalya-pos'); ?></span>
+                <span class="ord-pro-tot-grand-val ord-mono"><?php echo $cur . esc_html(number_format((float) $view_order->total_amount, 2)); ?></span>
             </div>
         </div>
     </div>
@@ -162,7 +203,7 @@ $st_class = 'ord-st-' . sanitize_html_class($view_order->status);
 
 <style>
     .ord-view-pro-shell { padding: 4px; max-width: 1400px; margin: 0 auto; }
-    
+
     .ord-back-bar { margin-bottom: 16px; }
     .ord-back-link {
         display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700;
@@ -262,9 +303,18 @@ $st_class = 'ord-st-' . sanitize_html_class($view_order->status);
 
 <script>
 jQuery(document).ready(function($) {
-    let restName  = <?php echo json_encode($s['restaurant_name'] ?? 'Restaurant'); ?>;
-    let currency  = <?php echo json_encode($cur); ?>;
-    let footerTxt = <?php echo json_encode($s['receipt_footer'] ?? 'Thank you!'); ?>;
+    let restName  = <?php echo wp_json_encode($s['restaurant_name'] ?? 'Restaurant'); ?>;
+    let currency  = <?php echo wp_json_encode($s['currency'] ?? '৳'); ?>;
+    let footerTxt = <?php echo wp_json_encode($s['receipt_footer'] ?? 'Thank you!'); ?>;
+
+    function escHtml(str) {
+        return String(str === null || str === undefined ? '' : str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
 
     // Status Select Dropdown Change
     $(document).on('change', '.js-ord-status-select', function() {
@@ -275,30 +325,32 @@ jQuery(document).ready(function($) {
     });
 
     // 1. Kitchen Order Ticket (KOT) Print Handler
-    $('.rtpos-print-kot').on('click', function() {
+    $(document).on('click', '.rtpos-print-kot', function() {
         let order = $(this).data('order');
         if (!order) return;
-        
-        let items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+
+        let items = typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []);
         let rows = '';
-        items.forEach(i => {
-            let extraStr = (i.extras && i.extras.length) ? `<br><span style="font-size:12px; font-weight:normal;">  + ${i.extras.join(', ')}</span>` : '';
-            rows += `<tr><td style="padding:4px 0;">${i.name}${extraStr}</td><td style="text-align:right; vertical-align:top;">x${i.qty}</td></tr>`;
+        items.forEach(function(i) {
+            let extraStr = (i.extras && i.extras.length)
+                ? `<br><span style="font-size:12px; font-weight:normal;">  + ${i.extras.map(escHtml).join(', ')}</span>`
+                : '';
+            rows += `<tr><td style="padding:4px 0;">${escHtml(i.name)}${extraStr}</td><td style="text-align:right; vertical-align:top;">x${parseInt(i.qty || 1, 10)}</td></tr>`;
         });
 
         let receipt = `
             <div style="text-align:center;">
-                <h2 style="margin:0; font-size:20px;">${restName}</h2>
+                <h2 style="margin:0; font-size:20px;">${escHtml(restName)}</h2>
                 <p style="margin:2px 0; font-size:12px;">*** KITCHEN TICKET (KOT) ***</p>
-                <h1 style="margin:6px 0; border:2px solid #000; padding:4px;">TABLE: ${order.table_no}</h1>
-                <p style="margin:2px 0;">Order #${order.id} | ${order.created_at}</p>
+                <h1 style="margin:6px 0; border:2px solid #000; padding:4px;">TABLE: ${escHtml(order.table_no)}</h1>
+                <p style="margin:2px 0;">Order #${parseInt(order.id, 10)} | ${escHtml(order.created_at)}</p>
             </div>
             <hr style="border-top:1px dashed #000;">
             <table style="width:100%; font-size:14px; font-weight:bold;">${rows}</table>
             <hr style="border-top:1px dashed #000;">
-            ${order.note ? `<p><strong>NOTE:</strong> ${order.note}</p><hr style="border-top:1px dashed #000;">` : ''}
+            ${order.note ? `<p><strong>NOTE:</strong> ${escHtml(order.note)}</p><hr style="border-top:1px dashed #000;">` : ''}
         `;
-        
+
         if ($('#rtpos-print-area').length === 0) {
             $('body').append('<div id="rtpos-print-area" style="display:none;"></div>');
         }
@@ -307,35 +359,39 @@ jQuery(document).ready(function($) {
     });
 
     // 2. Customer Receipt / Tax Bill Print Handler
-    $('.rtpos-print-bill').on('click', function() {
+    $(document).on('click', '.rtpos-print-bill', function() {
         let order = $(this).data('order');
         if (!order) return;
 
-        let items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+        let items = typeof order.items === 'string' ? JSON.parse(order.items) : (order.items || []);
         let rows = '';
-        items.forEach(i => {
-            let line = (parseFloat(i.unitPrice || i.price) * parseInt(i.qty)).toFixed(2);
-            let extraStr = (i.extras && i.extras.length) ? `<br><span style="font-size:11px; color:#444;">  + ${i.extras.join(', ')}</span>` : '';
-            rows += `<tr><td style="padding:3px 0;">${i.qty}x ${i.name}${extraStr}</td><td style="text-align:right; vertical-align:top;">${currency}${line}</td></tr>`;
+        items.forEach(function(i) {
+            let unitPr   = parseFloat(i.unitPrice || i.price || 0);
+            let qty      = parseInt(i.qty || 1, 10);
+            let line     = (unitPr * qty).toFixed(2);
+            let extraStr = (i.extras && i.extras.length)
+                ? `<br><span style="font-size:11px; color:#444;">  + ${i.extras.map(escHtml).join(', ')}</span>`
+                : '';
+            rows += `<tr><td style="padding:3px 0;">${qty}x ${escHtml(i.name)}${extraStr}</td><td style="text-align:right; vertical-align:top;">${escHtml(currency)}${line}</td></tr>`;
         });
 
         let receipt = `
             <div style="text-align:center;">
-                <h2 style="margin:0; font-size:20px;">${restName}</h2>
+                <h2 style="margin:0; font-size:20px;">${escHtml(restName)}</h2>
                 <p style="margin:2px 0; font-size:12px;">CUSTOMER RECEIPT</p>
-                <p style="margin:2px 0;">Table: <strong>${order.table_no}</strong> | Order #${order.id}</p>
-                <p style="margin:2px 0; font-size:11px;">${order.created_at}</p>
+                <p style="margin:2px 0;">Table: <strong>${escHtml(order.table_no)}</strong> | Order #${parseInt(order.id, 10)}</p>
+                <p style="margin:2px 0; font-size:11px;">${escHtml(order.created_at)}</p>
             </div>
             <hr style="border-top:1px dashed #000;">
             <table style="width:100%; font-size:13px;">${rows}</table>
             <hr style="border-top:1px dashed #000;">
-            <div style="display:flex; justify-content:space-between;"><span>Subtotal:</span><span>${currency}${parseFloat(order.subtotal).toFixed(2)}</span></div>
-            <div style="display:flex; justify-content:space-between;"><span>VAT/Tax:</span><span>${currency}${parseFloat(order.tax_amount).toFixed(2)}</span></div>
-            <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:bold; margin-top:4px;"><span>TOTAL:</span><span>${currency}${parseFloat(order.total_amount).toFixed(2)}</span></div>
+            <div style="display:flex; justify-content:space-between;"><span>Subtotal:</span><span>${escHtml(currency)}${parseFloat(order.subtotal || 0).toFixed(2)}</span></div>
+            <div style="display:flex; justify-content:space-between;"><span>VAT/Tax:</span><span>${escHtml(currency)}${parseFloat(order.tax_amount || 0).toFixed(2)}</span></div>
+            <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:bold; margin-top:4px;"><span>TOTAL:</span><span>${escHtml(currency)}${parseFloat(order.total_amount || 0).toFixed(2)}</span></div>
             <hr style="border-top:1px dashed #000;">
-            <p style="text-align:center; font-size:11px;">${footerTxt}</p>
+            <p style="text-align:center; font-size:11px;">${escHtml(footerTxt)}</p>
         `;
-        
+
         if ($('#rtpos-print-area').length === 0) {
             $('body').append('<div id="rtpos-print-area" style="display:none;"></div>');
         }

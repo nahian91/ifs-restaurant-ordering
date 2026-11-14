@@ -1,9 +1,33 @@
 <?php
-if (!defined('ABSPATH')) exit;
+/**
+ * Antalya POS Sales & Tax Reports View
+ *
+ * @package Antalya_POS
+ * @since 6.4
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * Validate YYYY-MM-DD date string safely
+ */
+function rtpos_validate_report_date($date_str, $fallback) {
+    if (!is_string($date_str) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date_str)) {
+        return $fallback;
+    }
+    $parts = explode('-', $date_str);
+    return checkdate((int) $parts[1], (int) $parts[2], (int) $parts[0]) ? $date_str : $fallback;
+}
 
 function rtpos_view_reports($s = []) {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__('You do not have sufficient permissions to access this page.', 'antalya-pos'));
+    }
+
     global $wpdb;
-    
+
     // Safe fallback for settings & currency if called without parameters
     if (empty($s) && function_exists('rtpos_get_settings')) {
         $s = rtpos_get_settings();
@@ -20,22 +44,34 @@ function rtpos_view_reports($s = []) {
     $svg_eye      = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
     $svg_back     = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>';
 
+    $now_ts       = current_time('timestamp');
     $today        = current_time('Y-m-d');
     $month_start  = current_time('Y-m-01');
-    $last7_start  = date('Y-m-d', strtotime('-6 days', current_time('timestamp')));
-    $prev_m_start = date('Y-m-01', strtotime('first day of last month', current_time('timestamp')));
-    $prev_m_end   = date('Y-m-t', strtotime('last day of last month', current_time('timestamp')));
+    $last7_start  = date('Y-m-d', strtotime('-6 days', $now_ts));
+    $prev_m_start = date('Y-m-01', strtotime('first day of last month', $now_ts));
+    $prev_m_end   = date('Y-m-t', strtotime('last day of last month', $now_ts));
 
-    $from       = isset($_GET['from']) ? sanitize_text_field($_GET['from']) : $month_start;
-    $to         = isset($_GET['to']) ? sanitize_text_field($_GET['to']) : $today;
-    $view_date  = isset($_GET['view_date']) ? sanitize_text_field($_GET['view_date']) : '';
+    $raw_from      = isset($_GET['from']) ? sanitize_text_field(wp_unslash($_GET['from'])) : $month_start;
+    $raw_to        = isset($_GET['to']) ? sanitize_text_field(wp_unslash($_GET['to'])) : $today;
+    $raw_view_date = isset($_GET['view_date']) ? sanitize_text_field(wp_unslash($_GET['view_date'])) : '';
+
+    $from      = rtpos_validate_report_date($raw_from, $month_start);
+    $to        = rtpos_validate_report_date($raw_to, $today);
+    $view_date = !empty($raw_view_date) ? rtpos_validate_report_date($raw_view_date, '') : '';
+
+    $base_reports_url = admin_url('admin.php?page=antalya-pos&tab=reports');
+    $base_orders_url  = admin_url('admin.php?page=antalya-pos&tab=orders');
 
     // 1. Summary Metrics with Safe Fallback
-    $summary = $wpdb->get_row($wpdb->prepare(
-        "SELECT COUNT(*) as total_orders, COALESCE(SUM(subtotal), 0) as sub_rev, COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(tax_amount), 0) as total_tax
-         FROM $t_orders WHERE DATE(created_at) BETWEEN %s AND %s AND status = 'completed'",
-        $from, $to
-    ));
+    $summary = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT COUNT(*) as total_orders, COALESCE(SUM(subtotal), 0) as sub_rev, COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(tax_amount), 0) as total_tax
+             FROM {$t_orders} WHERE DATE(created_at) BETWEEN %s AND %s AND status = %s",
+            $from,
+            $to,
+            'completed'
+        )
+    );
 
     $total_orders = $summary ? intval($summary->total_orders) : 0;
     $sub_rev      = $summary ? floatval($summary->sub_rev) : 0.0;
@@ -44,36 +80,46 @@ function rtpos_view_reports($s = []) {
     $avg_ticket   = ($total_orders > 0) ? ($revenue / $total_orders) : 0.0;
 
     // 2. Daily Breakdown
-    $daily_rows = $wpdb->get_results($wpdb->prepare(
-        "SELECT DATE(created_at) as sale_date, COUNT(*) as ord_count, COALESCE(SUM(subtotal), 0) as net_sales, COALESCE(SUM(tax_amount), 0) as tax_sum, COALESCE(SUM(total_amount), 0) as gross_sales
-         FROM $t_orders WHERE DATE(created_at) BETWEEN %s AND %s AND status = 'completed'
-         GROUP BY DATE(created_at) ORDER BY sale_date DESC",
-        $from, $to
-    )) ?: [];
+    $daily_rows = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT DATE(created_at) as sale_date, COUNT(*) as ord_count, COALESCE(SUM(subtotal), 0) as net_sales, COALESCE(SUM(tax_amount), 0) as tax_sum, COALESCE(SUM(total_amount), 0) as gross_sales
+             FROM {$t_orders} WHERE DATE(created_at) BETWEEN %s AND %s AND status = %s
+             GROUP BY DATE(created_at) ORDER BY sale_date DESC",
+            $from,
+            $to,
+            'completed'
+        )
+    ) ?: [];
 
     // 3. Top Selling Dishes in Selected Period
-    $period_orders = $wpdb->get_results($wpdb->prepare(
-        "SELECT items FROM $t_orders WHERE DATE(created_at) BETWEEN %s AND %s AND status = 'completed'",
-        $from, $to
-    )) ?: [];
+    $period_orders = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT items FROM {$t_orders} WHERE DATE(created_at) BETWEEN %s AND %s AND status = %s",
+            $from,
+            $to,
+            'completed'
+        )
+    ) ?: [];
 
     $dish_stats = [];
     foreach ($period_orders as $po) {
         $items = json_decode($po->items, true);
         if (is_array($items)) {
             foreach ($items as $it) {
-                $name = $it['name'] ?? 'Unknown Item';
+                $name = isset($it['name']) ? sanitize_text_field($it['name']) : __('Unknown Item', 'antalya-pos');
                 $qty  = intval($it['qty'] ?? 0);
                 $line = floatval($it['unitPrice'] ?? $it['price'] ?? 0) * $qty;
                 if (!isset($dish_stats[$name])) {
-                    $dish_stats[$name] = ['qty' => 0, 'rev' => 0];
+                    $dish_stats[$name] = ['qty' => 0, 'rev' => 0.0];
                 }
                 $dish_stats[$name]['qty'] += $qty;
                 $dish_stats[$name]['rev'] += $line;
             }
         }
     }
-    uasort($dish_stats, function($a, $b) { return $b['qty'] <=> $a['qty']; });
+    uasort($dish_stats, function($a, $b) {
+        return $b['qty'] <=> $a['qty'];
+    });
     $top_dishes = array_slice($dish_stats, 0, 6, true);
     ?>
 
@@ -81,7 +127,7 @@ function rtpos_view_reports($s = []) {
         .rep-full-wrap { width: 100%; box-sizing: border-box; }
         .apos-full-card { width: 100%; max-width: 100%; box-sizing: border-box; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 22px; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03); margin-bottom: 24px; }
         .apos-full-table { width: 100%; max-width: 100%; }
-        
+
         .rep-header-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
         /* Date Filter & Presets */
@@ -96,7 +142,7 @@ function rtpos_view_reports($s = []) {
             text-decoration: none; border: 1.5px solid #e2e8f0; background: #fff; color: #475569; transition: all 0.2s;
         }
         .rep-preset-btn:hover { border-color: #f97316; color: #f97316; background: #fff7ed; }
-        .rep-preset-btn.active { background: #0f172a; color: #fff; border-color: #0f172a; box-shadow: 0 2px 6px rgba(15,23,42,0.15); }
+        .rep-preset-btn.active { background: #0f172a; color: #fff; border-color: #0f172a; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.15); }
 
         /* Premium KPI Cards */
         .rep-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; margin-bottom: 24px; width: 100%; }
@@ -107,7 +153,7 @@ function rtpos_view_reports($s = []) {
         }
         .rep-kpi-card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08); }
         .rep-kpi-day { background: #f8fafc; }
-        
+
         .rep-border-green { border-left: 5px solid #10b981; }
         .rep-border-blue { border-left: 5px solid #3b82f6; }
         .rep-border-amber { border-left: 5px solid #f59e0b; }
@@ -196,61 +242,92 @@ function rtpos_view_reports($s = []) {
         .rep-day-hero-ico {
             width: 56px; height: 56px; border-radius: 16px; background: #fff7ed; color: #f97316;
             border: 1.5px solid #fed7aa; display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 4px 12px rgba(249,115,22,0.1);
+            box-shadow: 0 4px 12px rgba(249, 115, 22, 0.1);
         }
         .rep-day-sub { font-size: 11.5px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
         .rep-day-title { margin: 2px 0 0; font-size: 24px; font-weight: 900; color: #0f172a; }
         .rep-day-section-title { margin: 0 0 16px; font-size: 17px; font-weight: 800; color: #0f172a; }
+
+        @media print {
+            .apos-sidebar, .apos-sidebar-toggle, .rep-header-actions, .rep-presets, .rep-filter-bar { display: none !important; }
+            .apos-content-wrap { margin-left: 0 !important; }
+            .apos-main { padding: 0 !important; }
+        }
     </style>
 
     <div class="rep-full-wrap">
         <!-- Page Header -->
         <div class="apos-header">
             <div>
-                <h1>Sales & Tax Reports</h1>
+                <h1><?php esc_html_e('Sales & Tax Reports', 'antalya-pos'); ?></h1>
                 <?php if (!empty($view_date)) : ?>
-                    <p>Detailed daily transaction breakdown for <strong><?php echo esc_html(date('l, M d, Y', strtotime($view_date))); ?></strong></p>
+                    <p>
+                        <?php
+                        printf(
+                            /* translators: %s: formatted date */
+                            esc_html__('Detailed daily transaction breakdown for %s', 'antalya-pos'),
+                            '<strong>' . esc_html(date('l, M d, Y', strtotime($view_date))) . '</strong>'
+                        );
+                        ?>
+                    </p>
                 <?php else : ?>
-                    <p>Financial analytics and revenue breakdown from <strong><?php echo esc_html(date('M d, Y', strtotime($from))); ?></strong> to <strong><?php echo esc_html(date('M d, Y', strtotime($to))); ?></strong></p>
+                    <p>
+                        <?php
+                        printf(
+                            /* translators: 1: start date, 2: end date */
+                            esc_html__('Financial analytics and revenue breakdown from %1$s to %2$s', 'antalya-pos'),
+                            '<strong>' . esc_html(date('M d, Y', strtotime($from))) . '</strong>',
+                            '<strong>' . esc_html(date('M d, Y', strtotime($to))) . '</strong>'
+                        );
+                        ?>
+                    </p>
                 <?php endif; ?>
             </div>
             <div class="rep-header-actions">
-                <?php if (!empty($view_date)) : ?>
-                    <a href="?page=antalya-pos&tab=reports&from=<?php echo esc_attr($from); ?>&to=<?php echo esc_attr($to); ?>" class="apos-btn-secondary rep-btn-icon">
+                <?php if (!empty($view_date)) :
+                    $back_rep_url = esc_url(add_query_arg(['from' => $from, 'to' => $to], $base_reports_url));
+                ?>
+                    <a href="<?php echo $back_rep_url; ?>" class="apos-btn-secondary rep-btn-icon">
                         <?php echo $svg_back; ?>
-                        <span>Back to Report Overview</span>
+                        <span><?php esc_html_e('Back to Report Overview', 'antalya-pos'); ?></span>
                     </a>
                 <?php else : ?>
                     <button type="button" id="rep-export-csv" class="apos-btn-secondary rep-btn-icon">
                         <?php echo $svg_download; ?>
-                        <span>Export CSV</span>
+                        <span><?php esc_html_e('Export CSV', 'antalya-pos'); ?></span>
                     </button>
                 <?php endif; ?>
                 <button type="button" id="rep-print-btn" class="apos-btn rep-btn-icon">
                     <?php echo $svg_print; ?>
-                    <span>Print Report</span>
+                    <span><?php esc_html_e('Print Report', 'antalya-pos'); ?></span>
                 </button>
             </div>
         </div>
 
-        <?php if (!empty($view_date)) : 
+        <?php if (!empty($view_date)) :
             // ==============================================================
             // DEDICATED SINGLE-DAY SALES REPORT VIEW PAGE
             // ==============================================================
-            $day_summary = $wpdb->get_row($wpdb->prepare(
-                "SELECT COUNT(*) as total_orders, COALESCE(SUM(subtotal), 0) as sub_rev, COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(tax_amount), 0) as total_tax
-                 FROM $t_orders WHERE DATE(created_at) = %s AND status = 'completed'",
-                $view_date
-            ));
+            $day_summary = $wpdb->get_row(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) as total_orders, COALESCE(SUM(subtotal), 0) as sub_rev, COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(tax_amount), 0) as total_tax
+                     FROM {$t_orders} WHERE DATE(created_at) = %s AND status = %s",
+                    $view_date,
+                    'completed'
+                )
+            );
             $d_orders_cnt = $day_summary ? intval($day_summary->total_orders) : 0;
             $d_sub_rev    = $day_summary ? floatval($day_summary->sub_rev) : 0.0;
             $d_tax        = $day_summary ? floatval($day_summary->total_tax) : 0.0;
             $d_rev        = $day_summary ? floatval($day_summary->revenue) : 0.0;
 
-            $day_orders = $wpdb->get_results($wpdb->prepare(
-                "SELECT * FROM $t_orders WHERE DATE(created_at) = %s AND status = 'completed' ORDER BY id DESC",
-                $view_date
-            )) ?: [];
+            $day_orders = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT * FROM {$t_orders} WHERE DATE(created_at) = %s AND status = %s ORDER BY id DESC",
+                    $view_date,
+                    'completed'
+                )
+            ) ?: [];
         ?>
             <div class="apos-card apos-full-card">
                 <div class="rep-day-hero">
@@ -259,7 +336,7 @@ function rtpos_view_reports($s = []) {
                             <?php echo $svg_calendar; ?>
                         </div>
                         <div>
-                            <div class="rep-day-sub">Daily Sales Statement</div>
+                            <div class="rep-day-sub"><?php esc_html_e('Daily Sales Statement', 'antalya-pos'); ?></div>
                             <h2 class="rep-day-title"><?php echo esc_html(date('F d, Y (l)', strtotime($view_date))); ?></h2>
                         </div>
                     </div>
@@ -268,61 +345,72 @@ function rtpos_view_reports($s = []) {
                 <!-- Day KPIs -->
                 <div class="rep-kpi-grid">
                     <div class="rep-kpi-card rep-kpi-day rep-border-green">
-                        <div class="rep-kpi-lbl">Day Gross Revenue</div>
-                        <div class="rep-kpi-num rep-num-green"><?php echo $cur . number_format($d_rev, 2); ?></div>
+                        <div class="rep-kpi-lbl"><?php esc_html_e('Day Gross Revenue', 'antalya-pos'); ?></div>
+                        <div class="rep-kpi-num rep-num-green"><?php echo $cur . esc_html(number_format($d_rev, 2)); ?></div>
                     </div>
                     <div class="rep-kpi-card rep-kpi-day rep-border-blue">
-                        <div class="rep-kpi-lbl">Net Food Sales</div>
-                        <div class="rep-kpi-num"><?php echo $cur . number_format($d_sub_rev, 2); ?></div>
+                        <div class="rep-kpi-lbl"><?php esc_html_e('Net Food Sales', 'antalya-pos'); ?></div>
+                        <div class="rep-kpi-num"><?php echo $cur . esc_html(number_format($d_sub_rev, 2)); ?></div>
                     </div>
                     <div class="rep-kpi-card rep-kpi-day rep-border-amber">
-                        <div class="rep-kpi-lbl">Tax Collected</div>
-                        <div class="rep-kpi-num"><?php echo $cur . number_format($d_tax, 2); ?></div>
+                        <div class="rep-kpi-lbl"><?php esc_html_e('Tax Collected', 'antalya-pos'); ?></div>
+                        <div class="rep-kpi-num"><?php echo $cur . esc_html(number_format($d_tax, 2)); ?></div>
                     </div>
                     <div class="rep-kpi-card rep-kpi-day rep-border-orange">
-                        <div class="rep-kpi-lbl">Paid Orders</div>
-                        <div class="rep-kpi-num"><?php echo $d_orders_cnt; ?></div>
+                        <div class="rep-kpi-lbl"><?php esc_html_e('Paid Orders', 'antalya-pos'); ?></div>
+                        <div class="rep-kpi-num"><?php echo intval($d_orders_cnt); ?></div>
                     </div>
                 </div>
 
                 <!-- Day Completed Orders Table -->
-                <h3 class="rep-day-section-title">Completed Orders on <?php echo esc_html(date('M d, Y', strtotime($view_date))); ?></h3>
+                <h3 class="rep-day-section-title">
+                    <?php
+                    printf(
+                        /* translators: %s: formatted date */
+                        esc_html__('Completed Orders on %s', 'antalya-pos'),
+                        esc_html(date('M d, Y', strtotime($view_date)))
+                    );
+                    ?>
+                </h3>
                 <table class="apos-table apos-full-table rep-day-table">
                     <thead>
                         <tr style="background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
-                            <th class="col-do-id" style="padding:15px 18px;">Order #</th>
-                            <th class="col-do-time" style="padding:15px 14px;">Time</th>
-                            <th class="col-do-tbl" style="padding:15px 14px;">Table</th>
-                            <th style="padding:15px 14px;">Items Sold</th>
-                            <th class="col-do-sub" style="padding:15px 14px;">Subtotal</th>
-                            <th class="col-do-tax" style="padding:15px 14px;">Tax</th>
-                            <th class="col-do-tot" style="padding:15px 14px;">Total Paid</th>
-                            <th class="col-do-act" style="padding:15px 18px;">Action</th>
+                            <th class="col-do-id" style="padding:15px 18px;"><?php esc_html_e('Order #', 'antalya-pos'); ?></th>
+                            <th class="col-do-time" style="padding:15px 14px;"><?php esc_html_e('Time', 'antalya-pos'); ?></th>
+                            <th class="col-do-tbl" style="padding:15px 14px;"><?php esc_html_e('Table', 'antalya-pos'); ?></th>
+                            <th style="padding:15px 14px;"><?php esc_html_e('Items Sold', 'antalya-pos'); ?></th>
+                            <th class="col-do-sub" style="padding:15px 14px;"><?php esc_html_e('Subtotal', 'antalya-pos'); ?></th>
+                            <th class="col-do-tax" style="padding:15px 14px;"><?php esc_html_e('Tax', 'antalya-pos'); ?></th>
+                            <th class="col-do-tot" style="padding:15px 14px;"><?php esc_html_e('Total Paid', 'antalya-pos'); ?></th>
+                            <th class="col-do-act" style="padding:15px 18px;"><?php esc_html_e('Action', 'antalya-pos'); ?></th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if (empty($day_orders)) : ?>
-                            <tr><td colspan="8" class="rep-table-empty">No completed orders recorded on this date.</td></tr>
+                            <tr><td colspan="8" class="rep-table-empty"><?php esc_html_e('No completed orders recorded on this date.', 'antalya-pos'); ?></td></tr>
                         <?php endif; ?>
-                        <?php foreach ($day_orders as $do) : 
-                            $do_items     = json_decode($do->items, true) ?: [];
+                        <?php foreach ($day_orders as $do) :
+                            $do_items     = json_decode($do->items, true);
                             $item_summary = [];
-                            foreach ($do_items as $it) {
-                                $item_summary[] = intval($it['qty']) . 'x ' . $it['name'];
+                            if (is_array($do_items)) {
+                                foreach ($do_items as $it) {
+                                    $item_summary[] = intval($it['qty'] ?? 1) . 'x ' . ($it['name'] ?? '');
+                                }
                             }
+                            $inv_url = esc_url(add_query_arg('view_order', intval($do->id), $base_orders_url));
                         ?>
                         <tr style="transition:background 0.15s;">
                             <td style="padding:14px 18px;"><strong>#<?php echo intval($do->id); ?></strong></td>
                             <td style="padding:14px 14px;" class="rep-do-time"><?php echo esc_html(date('h:i A', strtotime($do->created_at))); ?></td>
-                            <td style="padding:14px 14px;"><span class="rep-do-tbl-badge">Table <?php echo esc_html($do->table_no); ?></span></td>
+                            <td style="padding:14px 14px;"><span class="rep-do-tbl-badge"><?php esc_html_e('Table', 'antalya-pos'); ?> <?php echo esc_html($do->table_no); ?></span></td>
                             <td style="padding:14px 14px;" class="rep-do-items"><?php echo esc_html(implode(', ', $item_summary)); ?></td>
-                            <td style="padding:14px 14px; font-family:monospace;"><?php echo $cur . number_format(floatval($do->subtotal), 2); ?></td>
-                            <td style="padding:14px 14px; font-family:monospace;"><?php echo $cur . number_format(floatval($do->tax_amount), 2); ?></td>
-                            <td style="padding:14px 14px;"><strong class="rep-gross-val"><?php echo $cur . number_format(floatval($do->total_amount), 2); ?></strong></td>
+                            <td style="padding:14px 14px; font-family:monospace;"><?php echo $cur . esc_html(number_format(floatval($do->subtotal), 2)); ?></td>
+                            <td style="padding:14px 14px; font-family:monospace;"><?php echo $cur . esc_html(number_format(floatval($do->tax_amount), 2)); ?></td>
+                            <td style="padding:14px 14px;"><strong class="rep-gross-val"><?php echo $cur . esc_html(number_format(floatval($do->total_amount), 2)); ?></strong></td>
                             <td style="padding:14px 18px; text-align:right;">
-                                <a href="?page=antalya-pos&tab=orders&view_order=<?php echo intval($do->id); ?>" class="rep-act-btn">
+                                <a href="<?php echo $inv_url; ?>" class="rep-act-btn">
                                     <?php echo $svg_eye; ?>
-                                    <span>Invoice</span>
+                                    <span><?php esc_html_e('Invoice', 'antalya-pos'); ?></span>
                                 </a>
                             </td>
                         </tr>
@@ -335,33 +423,32 @@ function rtpos_view_reports($s = []) {
             <!-- ============================================================== -->
             <!-- MAIN REPORTS OVERVIEW (FULL WIDTH) -->
             <!-- ============================================================== -->
-            <!-- Date Range & Quick Presets Card -->
             <div class="apos-card apos-full-card">
                 <div class="rep-presets">
-                    <a href="?page=antalya-pos&tab=reports&from=<?php echo esc_attr($today); ?>&to=<?php echo esc_attr($today); ?>" class="rep-preset-btn <?php echo ($from === $today && $to === $today) ? 'active' : ''; ?>">Today</a>
-                    <a href="?page=antalya-pos&tab=reports&from=<?php echo esc_attr($last7_start); ?>&to=<?php echo esc_attr($today); ?>" class="rep-preset-btn <?php echo ($from === $last7_start && $to === $today) ? 'active' : ''; ?>">Last 7 Days</a>
-                    <a href="?page=antalya-pos&tab=reports&from=<?php echo esc_attr($month_start); ?>&to=<?php echo esc_attr($today); ?>" class="rep-preset-btn <?php echo ($from === $month_start && $to === $today) ? 'active' : ''; ?>">This Month</a>
-                    <a href="?page=antalya-pos&tab=reports&from=<?php echo esc_attr($prev_m_start); ?>&to=<?php echo esc_attr($prev_m_end); ?>" class="rep-preset-btn <?php echo ($from === $prev_m_start && $to === $prev_m_end) ? 'active' : ''; ?>">Last Month</a>
+                    <a href="<?php echo esc_url(add_query_arg(['from' => $today, 'to' => $today], $base_reports_url)); ?>" class="rep-preset-btn <?php echo ($from === $today && $to === $today) ? 'active' : ''; ?>"><?php esc_html_e('Today', 'antalya-pos'); ?></a>
+                    <a href="<?php echo esc_url(add_query_arg(['from' => $last7_start, 'to' => $today], $base_reports_url)); ?>" class="rep-preset-btn <?php echo ($from === $last7_start && $to === $today) ? 'active' : ''; ?>"><?php esc_html_e('Last 7 Days', 'antalya-pos'); ?></a>
+                    <a href="<?php echo esc_url(add_query_arg(['from' => $month_start, 'to' => $today], $base_reports_url)); ?>" class="rep-preset-btn <?php echo ($from === $month_start && $to === $today) ? 'active' : ''; ?>"><?php esc_html_e('This Month', 'antalya-pos'); ?></a>
+                    <a href="<?php echo esc_url(add_query_arg(['from' => $prev_m_start, 'to' => $prev_m_end], $base_reports_url)); ?>" class="rep-preset-btn <?php echo ($from === $prev_m_start && $to === $prev_m_end) ? 'active' : ''; ?>"><?php esc_html_e('Last Month', 'antalya-pos'); ?></a>
                 </div>
 
-                <form method="get" class="rep-filter-bar">
+                <form method="get" action="<?php echo esc_url(admin_url('admin.php')); ?>" class="rep-filter-bar">
                     <input type="hidden" name="page" value="antalya-pos">
                     <input type="hidden" name="tab" value="reports">
 
                     <div class="rep-date-inputs">
                         <div class="apos-form-group rep-date-field">
-                            <label class="apos-label">From Date</label>
+                            <label class="apos-label"><?php esc_html_e('From Date', 'antalya-pos'); ?></label>
                             <input type="date" name="from" class="apos-input" value="<?php echo esc_attr($from); ?>" required>
                         </div>
                         <div class="apos-form-group rep-date-field">
-                            <label class="apos-label">To Date</label>
+                            <label class="apos-label"><?php esc_html_e('To Date', 'antalya-pos'); ?></label>
                             <input type="date" name="to" class="apos-input" value="<?php echo esc_attr($to); ?>" required>
                         </div>
                     </div>
 
                     <button type="submit" class="apos-btn rep-btn-icon rep-generate-btn">
                         <?php echo $svg_chart; ?>
-                        <span>Generate Report</span>
+                        <span><?php esc_html_e('Generate Report', 'antalya-pos'); ?></span>
                     </button>
                 </form>
             </div>
@@ -369,27 +456,38 @@ function rtpos_view_reports($s = []) {
             <!-- Financial Summary KPIs -->
             <div class="rep-kpi-grid">
                 <div class="rep-kpi-card rep-border-green">
-                    <div class="rep-kpi-lbl">Gross Revenue</div>
-                    <div class="rep-kpi-num rep-num-green"><?php echo $cur . number_format($revenue, 2); ?></div>
-                    <div class="rep-kpi-sub">Total paid bills collected</div>
+                    <div class="rep-kpi-lbl"><?php esc_html_e('Gross Revenue', 'antalya-pos'); ?></div>
+                    <div class="rep-kpi-num rep-num-green"><?php echo $cur . esc_html(number_format($revenue, 2)); ?></div>
+                    <div class="rep-kpi-sub"><?php esc_html_e('Total paid bills collected', 'antalya-pos'); ?></div>
                 </div>
 
                 <div class="rep-kpi-card rep-border-blue">
-                    <div class="rep-kpi-lbl">Net Food Sales</div>
-                    <div class="rep-kpi-num" style="font-family:monospace;"><?php echo $cur . number_format($sub_rev, 2); ?></div>
-                    <div class="rep-kpi-sub">Excluding VAT / tax</div>
+                    <div class="rep-kpi-lbl"><?php esc_html_e('Net Food Sales', 'antalya-pos'); ?></div>
+                    <div class="rep-kpi-num" style="font-family:monospace;"><?php echo $cur . esc_html(number_format($sub_rev, 2)); ?></div>
+                    <div class="rep-kpi-sub"><?php esc_html_e('Excluding VAT / tax', 'antalya-pos'); ?></div>
                 </div>
 
                 <div class="rep-kpi-card rep-border-amber">
-                    <div class="rep-kpi-lbl">VAT / Tax Collected</div>
-                    <div class="rep-kpi-num" style="font-family:monospace;"><?php echo $cur . number_format($total_tax, 2); ?></div>
-                    <div class="rep-kpi-sub">Tax rate: <?php echo floatval($s['tax_percent'] ?? 0); ?>%</div>
+                    <div class="rep-kpi-lbl"><?php esc_html_e('VAT / Tax Collected', 'antalya-pos'); ?></div>
+                    <div class="rep-kpi-num" style="font-family:monospace;"><?php echo $cur . esc_html(number_format($total_tax, 2)); ?></div>
+                    <div class="rep-kpi-sub">
+                        <?php
+                        printf(
+                            /* translators: %s: tax rate percentage */
+                            esc_html__('Tax rate: %s%%', 'antalya-pos'),
+                            esc_html(floatval($s['tax_percent'] ?? 0))
+                        );
+                        ?>
+                    </div>
                 </div>
 
                 <div class="rep-kpi-card rep-border-orange">
-                    <div class="rep-kpi-lbl">Completed Orders</div>
-                    <div class="rep-kpi-num"><?php echo $total_orders; ?></div>
-                    <div class="rep-kpi-sub">Avg. ticket: <strong style="font-family:monospace;"><?php echo $cur . number_format($avg_ticket, 2); ?></strong></div>
+                    <div class="rep-kpi-lbl"><?php esc_html_e('Completed Orders', 'antalya-pos'); ?></div>
+                    <div class="rep-kpi-num"><?php echo intval($total_orders); ?></div>
+                    <div class="rep-kpi-sub">
+                        <?php esc_html_e('Avg. ticket:', 'antalya-pos'); ?>
+                        <strong style="font-family:monospace;"><?php echo $cur . esc_html(number_format($avg_ticket, 2)); ?></strong>
+                    </div>
                 </div>
             </div>
 
@@ -400,41 +498,51 @@ function rtpos_view_reports($s = []) {
                     <div class="rep-card-head">
                         <h3 class="rep-card-title">
                             <span class="rep-title-ico"><?php echo $svg_calendar; ?></span>
-                            <span>Daily Sales Breakdown</span>
+                            <span><?php esc_html_e('Daily Sales Breakdown', 'antalya-pos'); ?></span>
                         </h3>
-                        <span class="rep-days-cnt"><?php echo count($daily_rows); ?> active day(s)</span>
+                        <span class="rep-days-cnt">
+                            <?php
+                            printf(
+                                /* translators: %d: number of active days */
+                                esc_html__('%d active day(s)', 'antalya-pos'),
+                                count($daily_rows)
+                            );
+                            ?>
+                        </span>
                     </div>
 
                     <table class="apos-table apos-full-table rep-inner-table" id="rep-daily-table">
                         <thead>
                             <tr style="background:#f8fafc; border-bottom:1.5px solid #e2e8f0;">
-                                <th style="padding:15px 18px;">Date</th>
-                                <th style="padding:15px 14px;">Orders</th>
-                                <th style="padding:15px 14px;">Net Sales</th>
-                                <th style="padding:15px 14px;">Tax</th>
-                                <th style="padding:15px 14px;">Gross Total</th>
-                                <th class="col-rep-details" style="padding:15px 18px;">Details</th>
+                                <th style="padding:15px 18px;"><?php esc_html_e('Date', 'antalya-pos'); ?></th>
+                                <th style="padding:15px 14px;"><?php esc_html_e('Orders', 'antalya-pos'); ?></th>
+                                <th style="padding:15px 14px;"><?php esc_html_e('Net Sales', 'antalya-pos'); ?></th>
+                                <th style="padding:15px 14px;"><?php esc_html_e('Tax', 'antalya-pos'); ?></th>
+                                <th style="padding:15px 14px;"><?php esc_html_e('Gross Total', 'antalya-pos'); ?></th>
+                                <th class="col-rep-details" style="padding:15px 18px;"><?php esc_html_e('Details', 'antalya-pos'); ?></th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if (empty($daily_rows)) : ?>
-                                <tr><td colspan="6" class="rep-table-empty">No completed orders in this date range.</td></tr>
+                                <tr><td colspan="6" class="rep-table-empty"><?php esc_html_e('No completed orders in this date range.', 'antalya-pos'); ?></td></tr>
                             <?php endif; ?>
-                            <?php foreach ($daily_rows as $dr) : ?>
+                            <?php foreach ($daily_rows as $dr) :
+                                $day_view_url = esc_url(add_query_arg(['from' => $from, 'to' => $to, 'view_date' => $dr->sale_date], $base_reports_url));
+                            ?>
                             <tr>
                                 <td style="padding:14px 18px;">
-                                    <a href="?page=antalya-pos&tab=reports&from=<?php echo esc_attr($from); ?>&to=<?php echo esc_attr($to); ?>&view_date=<?php echo esc_attr($dr->sale_date); ?>" class="rep-date-link">
+                                    <a href="<?php echo $day_view_url; ?>" class="rep-date-link">
                                         <?php echo esc_html(date('M d, Y (D)', strtotime($dr->sale_date))); ?>
                                     </a>
                                 </td>
                                 <td style="padding:14px 14px;"><strong><?php echo intval($dr->ord_count); ?></strong></td>
-                                <td style="padding:14px 14px; font-family:monospace;"><?php echo $cur . number_format(floatval($dr->net_sales), 2); ?></td>
-                                <td style="padding:14px 14px; font-family:monospace;"><?php echo $cur . number_format(floatval($dr->tax_sum), 2); ?></td>
-                                <td style="padding:14px 14px;"><strong class="rep-gross-val"><?php echo $cur . number_format(floatval($dr->gross_sales), 2); ?></strong></td>
+                                <td style="padding:14px 14px; font-family:monospace;"><?php echo $cur . esc_html(number_format(floatval($dr->net_sales), 2)); ?></td>
+                                <td style="padding:14px 14px; font-family:monospace;"><?php echo $cur . esc_html(number_format(floatval($dr->tax_sum), 2)); ?></td>
+                                <td style="padding:14px 14px;"><strong class="rep-gross-val"><?php echo $cur . esc_html(number_format(floatval($dr->gross_sales), 2)); ?></strong></td>
                                 <td style="padding:14px 18px; text-align:right;">
-                                    <a href="?page=antalya-pos&tab=reports&from=<?php echo esc_attr($from); ?>&to=<?php echo esc_attr($to); ?>&view_date=<?php echo esc_attr($dr->sale_date); ?>" class="rep-act-btn">
+                                    <a href="<?php echo $day_view_url; ?>" class="rep-act-btn">
                                         <?php echo $svg_eye; ?>
-                                        <span>View</span>
+                                        <span><?php esc_html_e('View', 'antalya-pos'); ?></span>
                                     </a>
                                 </td>
                             </tr>
@@ -448,26 +556,34 @@ function rtpos_view_reports($s = []) {
                     <div class="rep-card-head">
                         <h3 class="rep-card-title">
                             <span class="rep-title-ico"><?php echo $svg_award; ?></span>
-                            <span>Top Dishes (Selected Period)</span>
+                            <span><?php esc_html_e('Top Dishes (Selected Period)', 'antalya-pos'); ?></span>
                         </h3>
                     </div>
 
                     <?php if (empty($top_dishes)) : ?>
-                        <p class="rep-empty-dishes">No item sales data available.</p>
+                        <p class="rep-empty-dishes"><?php esc_html_e('No item sales data available.', 'antalya-pos'); ?></p>
                     <?php else : ?>
                         <div class="rep-top-list">
                             <?php $rank = 1; foreach ($top_dishes as $d_name => $st) : ?>
                             <div class="rep-top-row">
                                 <div class="rep-top-left">
-                                    <span class="rep-rank-badge <?php echo $rank === 1 ? 'rank-1' : ''; ?>">
-                                        #<?php echo $rank++; ?>
+                                    <span class="rep-rank-badge <?php echo ($rank === 1) ? 'rank-1' : ''; ?>">
+                                        #<?php echo intval($rank++); ?>
                                     </span>
                                     <div>
                                         <strong class="rep-dish-name"><?php echo esc_html($d_name); ?></strong>
-                                        <small class="rep-dish-qty"><?php echo intval($st['qty']); ?> units sold</small>
+                                        <small class="rep-dish-qty">
+                                            <?php
+                                            printf(
+                                                /* translators: %d: units sold */
+                                                esc_html__('%d units sold', 'antalya-pos'),
+                                                intval($st['qty'])
+                                            );
+                                            ?>
+                                        </small>
                                     </div>
                                 </div>
-                                <strong class="rep-dish-rev"><?php echo $cur . number_format($st['rev'], 2); ?></strong>
+                                <strong class="rep-dish-rev"><?php echo $cur . esc_html(number_format((float) $st['rev'], 2)); ?></strong>
                             </div>
                             <?php endforeach; ?>
                         </div>
@@ -479,6 +595,8 @@ function rtpos_view_reports($s = []) {
 
     <script>
     jQuery(document).ready(function($) {
+        let csvFilename = <?php echo wp_json_encode('sales-report-' . $from . '-to-' . $to . '.csv'); ?>;
+
         $('#rep-print-btn').on('click', function() {
             window.print();
         });
@@ -491,15 +609,20 @@ function rtpos_view_reports($s = []) {
                     let txt = $(this).text().trim().replace(/"/g, '""');
                     row.push('"' + txt + '"');
                 });
-                csv.push(row.join(','));
+                if (row.length > 0) {
+                    csv.push(row.join(','));
+                }
             });
 
             let blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
             let url  = URL.createObjectURL(blob);
             let a    = document.createElement('a');
             a.href     = url;
-            a.download = 'sales-report-<?php echo esc_js($from . '-to-' . $to); ?>.csv';
+            a.download = csvFilename;
+            document.body.appendChild(a);
             a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         });
     });
     </script>

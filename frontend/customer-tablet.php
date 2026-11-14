@@ -1,8 +1,19 @@
 <?php
-if (!defined('ABSPATH')) exit;
+/**
+ * Antalya POS Tablet Authentication & Customer UI Shortcode
+ *
+ * @package Antalya_POS
+ * @since 6.4
+ */
+
+if (!defined('ABSPATH')) {
+    exit;
+}
 
 /**
  * Helper: Get Authenticated Table Row from Secure Cookie
+ *
+ * @return object|null Table row object or null.
  */
 function rtpos_get_authenticated_table() {
     global $wpdb;
@@ -21,7 +32,11 @@ function rtpos_get_authenticated_table() {
     $table_id = intval($parts[0]);
     $token    = $parts[1];
 
-    $tbl = $wpdb->get_row($wpdb->prepare("SELECT * FROM $t_tables WHERE id = %d", $table_id));
+    if ($table_id <= 0 || empty($token)) {
+        return null;
+    }
+
+    $tbl = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$t_tables} WHERE id = %d", $table_id));
     if (!$tbl || empty($tbl->table_login)) {
         return null;
     }
@@ -50,11 +65,15 @@ function rtpos_fullscreen_tablet_mode() {
 
     // Handle Table Login Submission
     if (isset($_POST['rtpos_table_login_submit'])) {
+        if (!isset($_POST['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_wpnonce'])), 'rtpos_table_login_action')) {
+            wp_die(esc_html__('Security check failed. Please try again.', 'antalya-pos'));
+        }
+
         $login_input = sanitize_text_field(wp_unslash($_POST['rtpos_login'] ?? ''));
         $pass_input  = sanitize_text_field(wp_unslash($_POST['rtpos_pass'] ?? ''));
 
         $matched_tbl = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM $t_tables WHERE table_login = %s LIMIT 1",
+            "SELECT * FROM {$t_tables} WHERE table_login = %s LIMIT 1",
             $login_input
         ));
 
@@ -67,11 +86,12 @@ function rtpos_fullscreen_tablet_mode() {
             wp_safe_redirect($page_url);
             exit;
         } else {
-            $auth_err = 'Incorrect table username or password. Please check and try again.';
+            $auth_err = __('Incorrect table username or password. Please check and try again.', 'antalya-pos');
         }
     }
 
     $s = rtpos_get_settings();
+    $restaurant_name = $s['restaurant_name'] ?? 'Antalya POS';
     ?>
     <!DOCTYPE html>
     <html <?php language_attributes(); ?>>
@@ -80,7 +100,7 @@ function rtpos_fullscreen_tablet_mode() {
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="mobile-web-app-capable" content="yes">
-        <title><?php echo esc_html($s['restaurant_name']); ?> — Table Menu</title>
+        <title><?php echo esc_html($restaurant_name); ?> — <?php esc_html_e('Table Menu', 'antalya-pos'); ?></title>
         <?php wp_head(); ?>
         <style>
             html, body {
@@ -113,10 +133,11 @@ add_shortcode('restaurant_menu', 'rtpos_customer_tablet_ui');
 function rtpos_customer_tablet_ui() {
     global $wpdb;
     $s         = rtpos_get_settings();
-    $cur       = esc_html($s['currency']);
-    $tax_rate  = floatval($s['tax_percent']);
+    $cur       = esc_html($s['currency'] ?? '৳');
+    $tax_rate  = floatval($s['tax_percent'] ?? 0);
     $auth_tbl  = rtpos_get_authenticated_table();
     $login_err = $GLOBALS['rtpos_login_error'] ?? '';
+    $restaurant_name = $s['restaurant_name'] ?? 'Antalya POS';
 
     // Reusable SVG Icons
     $svg_lock      = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
@@ -195,17 +216,18 @@ function rtpos_customer_tablet_ui() {
 
         <div class="rt-login-screen">
             <div class="rt-login-card">
-                <div class="rt-login-logo"><?php echo esc_html(substr($s['restaurant_name'], 0, 1)); ?></div>
-                <h1 class="rt-login-title"><?php echo esc_html($s['restaurant_name']); ?></h1>
-                <p class="rt-login-sub">Table Setup<br>Sign in once with your table username and password.</p>
+                <div class="rt-login-logo"><?php echo esc_html(mb_substr($restaurant_name, 0, 1)); ?></div>
+                <h1 class="rt-login-title"><?php echo esc_html($restaurant_name); ?></h1>
+                <p class="rt-login-sub"><?php esc_html_e('Table Setup', 'antalya-pos'); ?><br><?php esc_html_e('Sign in once with your table username and password.', 'antalya-pos'); ?></p>
 
                 <?php if (!empty($login_err)) : ?>
                     <div class="rt-login-err"><?php echo esc_html($login_err); ?></div>
                 <?php endif; ?>
 
                 <form method="post">
+                    <?php wp_nonce_field('rtpos_table_login_action'); ?>
                     <div class="rt-l-group">
-                        <label class="rt-l-label">Table Username</label>
+                        <label class="rt-l-label"><?php esc_html_e('Table Username', 'antalya-pos'); ?></label>
                         <div class="rt-l-wrap">
                             <span class="rt-l-ico"><?php echo $svg_user; ?></span>
                             <input type="text" name="rtpos_login" class="rt-l-input" placeholder="e.g. table_01" value="<?php echo esc_attr($prefill_login); ?>" required autocomplete="username">
@@ -213,17 +235,17 @@ function rtpos_customer_tablet_ui() {
                     </div>
 
                     <div class="rt-l-group">
-                        <label class="rt-l-label">Password</label>
+                        <label class="rt-l-label"><?php esc_html_e('Password', 'antalya-pos'); ?></label>
                         <div class="rt-l-wrap">
                             <span class="rt-l-ico"><?php echo $svg_key; ?></span>
-                            <input type="password" name="rtpos_pass" id="rt-login-pass-inp" class="rt-l-input" placeholder="Enter password" required autocomplete="current-password">
-                            <button type="button" id="rt-toggle-pass" class="rt-l-eye-btn" title="Show or Hide Password"><?php echo $svg_eye; ?></button>
+                            <input type="password" name="rtpos_pass" id="rt-login-pass-inp" class="rt-l-input" placeholder="<?php esc_attr_e('Enter password', 'antalya-pos'); ?>" required autocomplete="current-password">
+                            <button type="button" id="rt-toggle-pass" class="rt-l-eye-btn" title="<?php esc_attr_e('Show or Hide Password', 'antalya-pos'); ?>"><?php echo $svg_eye; ?></button>
                         </div>
                     </div>
 
                     <button type="submit" name="rtpos_table_login_submit" class="rt-l-submit">
                         <?php echo $svg_lock; ?>
-                        <span>Open Table Menu</span>
+                        <span><?php esc_html_e('Open Table Menu', 'antalya-pos'); ?></span>
                     </button>
                 </form>
             </div>
@@ -234,7 +256,9 @@ function rtpos_customer_tablet_ui() {
                 if (toggleBtn) {
                     toggleBtn.addEventListener('click', function() {
                         var inp = document.getElementById('rt-login-pass-inp');
-                        inp.type = (inp.type === 'password') ? 'text' : 'password';
+                        if (inp) {
+                            inp.type = (inp.type === 'password') ? 'text' : 'password';
+                        }
                     });
                 }
             });
@@ -244,7 +268,7 @@ function rtpos_customer_tablet_ui() {
     }
 
     // =========================================================================
-    // STEP 2: AUTHENTICATED TABLET MENU UI (ZERO INLINE CSS/JS, FULL NAMES)
+    // STEP 2: AUTHENTICATED TABLET MENU UI
     // =========================================================================
     $table_no    = $auth_tbl->table_name;
     $table_seats = intval($auth_tbl->seats);
@@ -376,7 +400,7 @@ function rtpos_customer_tablet_ui() {
         /* Main Split App Layout */
         .rt-app { display: flex; gap: 18px; align-items: flex-start; width: 100%; box-sizing: border-box; position: relative; }
 
-        /* Left Sidebar Category Menu - Full Text Visible */
+        /* Left Sidebar Category Menu */
         .rt-sidebar-cats {
             width: 195px; min-width: 195px; flex-shrink: 0; background: #fff; border: 1.5px solid #e2e8f0;
             border-radius: 20px; padding: 10px; display: flex; flex-direction: column; gap: 6px;
@@ -446,7 +470,7 @@ function rtpos_customer_tablet_ui() {
         .rt-empty-state-box p { margin: 0; font-size: 14.5px; }
         .rt-hidden { display: none; }
 
-        /* Food Menu Grid - Full Item Name Visible (No Truncation) */
+        /* Food Menu Grid */
         .rt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; width: 100%; box-sizing: border-box; }
         .rt-card {
             background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 20px; padding: 14px;
@@ -474,14 +498,12 @@ function rtpos_customer_tablet_ui() {
         }
         .rt-card .price { color: #f97316; font-weight: 900; font-size: 18px; margin-bottom: 10px; }
 
-        /* Touch-Friendly Extras Box on Card - Full Visible Name */
+        /* Touch-Friendly Extras Box on Card */
         .rt-extras-box {
             background: #f8fafc; padding: 8px; border-radius: 13px; margin-bottom: 12px;
             border: 1.5px solid #e2e8f0; display: flex; flex-direction: column; gap: 7px; box-sizing: border-box;
         }
-        .rt-extras-hint {
-            font-size: 11px; font-weight: 700; color: #64748b; padding: 0 4px;
-        }
+        .rt-extras-hint { font-size: 11px; font-weight: 700; color: #64748b; padding: 0 4px; }
         .rt-extra-item {
             display: flex; align-items: center; justify-content: space-between; gap: 8px;
             cursor: pointer; padding: 8px 11px; border-radius: 10px; background: #fff;
@@ -498,10 +520,8 @@ function rtpos_customer_tablet_ui() {
         .rt-extra-item input { accent-color: #f97316; width: 16px; height: 16px; margin: 0; cursor: pointer; flex-shrink: 0; }
         .rt-extra-price-tag { color: #f97316; }
 
-        /* Card Action Row: Quantity Selector + Add Button */
-        .rt-card-actions {
-            display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
-        }
+        /* Card Action Row */
+        .rt-card-actions { display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; }
         .rt-card-qty-ctrl {
             display: inline-flex; align-items: center; background: #f1f5f9;
             border: 1.5px solid #cbd5e1; border-radius: 12px; padding: 3px; height: 46px; box-sizing: border-box; flex-shrink: 0;
@@ -512,9 +532,7 @@ function rtpos_customer_tablet_ui() {
             display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 2px rgba(0,0,0,0.06);
         }
         .rt-cq-btn:active { background: #e2e8f0; transform: scale(0.93); }
-        .rt-cq-val {
-            min-width: 24px; text-align: center; font-weight: 900; font-size: 14.5px; color: #0f172a;
-        }
+        .rt-cq-val { min-width: 24px; text-align: center; font-weight: 900; font-size: 14.5px; color: #0f172a; }
 
         .rt-add {
             background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; border: none; padding: 0 12px; height: 46px; flex: 1; border-radius: 13px;
@@ -524,20 +542,12 @@ function rtpos_customer_tablet_ui() {
         .rt-add:hover { background: #f97316; }
         .rt-add:active { transform: scale(0.96); }
 
-        /* ==============================================================
-           RIGHT PANEL: COMBINED LIVE STATUS & RECEIPT BOX
-           ============================================================== */
+        /* Right Column Tray & Live Tracker */
         .rt-right-col {
-            display: none;
-            flex: 1;
-            min-width: 0;
-            flex-direction: column; gap: 18px;
-            box-sizing: border-box;
+            display: none; flex: 1; min-width: 0; flex-direction: column; gap: 18px; box-sizing: border-box;
             animation: rtFadeInPanel 0.25s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .rt-right-col.panel-open {
-            display: flex;
-        }
+        .rt-right-col.panel-open { display: flex; }
         @keyframes rtFadeInPanel {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -557,7 +567,7 @@ function rtpos_customer_tablet_ui() {
 
         .rt-box { background: #fff; border: 1.5px solid #e2e8f0; border-radius: 22px; padding: 22px; box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04); box-sizing: border-box; }
 
-        /* Super App-Style Live Order Status Card */
+        /* Live Order Tracker */
         .rt-live-tracker {
             display: none; flex-shrink: 0; box-sizing: border-box;
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
@@ -596,15 +606,13 @@ function rtpos_customer_tablet_ui() {
         .rt-tb-item-name { color: #fff; }
         .rt-tb-item-sub { color: #94a3b8; font-size: 11px; font-family: monospace; }
         .rt-tb-item-total { font-family: monospace; white-space: nowrap; color: #fff; }
-        .rt-tb-ex-line { display: flex; justify-content: space-between; font-size: 11px; color: #fdba74; font-weight: 700; padding-left: 10px; }
-        .rt-tb-ex-price { font-family: monospace; }
         .rt-tb-totals { margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.15); display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: #94a3b8; font-weight: 700; }
         .rt-tb-sum-line { display: flex; justify-content: space-between; }
         .rt-tb-sum-val { font-family: monospace; color: #cbd5e1; }
         .rt-tb-grand-line { display: flex; justify-content: space-between; color: #fff; font-size: 12.5px; font-weight: 900; padding-top: 3px; border-top: 1px dashed #475569; }
         .rt-tb-grand-val { font-family: monospace; color: #60a5fa; }
 
-        /* Connected Visual 3-Step Progress Bar */
+        /* Progress Stepper */
         .rt-stepper-wrap { display: flex; align-items: flex-start; justify-content: space-between; position: relative; margin-bottom: 12px; padding: 0 4px; box-sizing: border-box; }
         .rt-step-node { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; z-index: 2; text-align: center; }
         .rt-step-node:not(:last-child)::after { content: ''; position: absolute; top: 14px; left: 50%; width: 100%; height: 3px; background: #334155; z-index: -1; }
@@ -629,7 +637,7 @@ function rtpos_customer_tablet_ui() {
         .rt-pulse-orange { background: #f97316; }
         @keyframes rtPulse { 0% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.4); opacity: 0.5; } 100% { transform: scale(0.95); opacity: 1; } }
 
-        /* Print-Style Order Receipt Tray */
+        /* Receipt Box */
         .rt-receipt-box { background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 20px 20px 10px 10px; padding: 24px 24px 28px; box-shadow: 0 15px 35px -8px rgba(15, 23, 42, 0.12); position: relative; color: #0f172a; box-sizing: border-box; }
         .rt-receipt-box::after { content: ''; position: absolute; left: 0; right: 0; bottom: -8px; height: 9px; background: linear-gradient(-45deg, transparent 33.33%, #ffffff 33.33%, #ffffff 66.66%, transparent 66.66%), linear-gradient(45deg, transparent 33.33%, #ffffff 33.33%, #ffffff 66.66%, transparent 66.66%); background-size: 14px 16px; }
         .rt-rc-head { text-align: center; padding-bottom: 14px; border-bottom: 1.5px dashed #cbd5e1; }
@@ -721,13 +729,12 @@ function rtpos_customer_tablet_ui() {
         .rt-conf-more-btn { height: 52px; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: #fff; border: none; padding: 0 22px; border-radius: 15px; font-weight: 900; font-size: 15.5px; cursor: pointer; width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; }
         .rt-conf-track-btn { height: 46px; background: #f1f5f9; color: #334155; border: none; padding: 0 20px; border-radius: 13px; font-weight: 800; font-size: 14.5px; cursor: pointer; width: 100%; }
 
-        /* Mobile Bottom Bar & Drawer Backdrop */
+        /* Mobile Bottom Bar */
         .rt-mobile-bar { display: none; position: fixed; bottom: 16px; left: 16px; right: 16px; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; padding: 16px 22px; border-radius: 18px; justify-content: space-between; align-items: center; z-index: 990; box-shadow: 0 15px 35px rgba(15, 23, 42, 0.4); font-weight: 900; font-size: 16px; cursor: pointer; border: 1px solid rgba(255,255,255,0.15); box-sizing: border-box; }
         .rt-mob-bar-left { display: flex; align-items: center; gap: 9px; }
         .rt-mob-bar-price { background: #f97316; padding: 6px 14px; border-radius: 20px; font-size: 15px; font-weight: 900; }
         .rt-drawer-backdrop { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px); z-index: 995; }
 
-        /* Responsive Layout (< 740px) */
         @media (max-width: 739px) {
             .rt-wrapper { padding: 12px 12px 96px; }
             .rt-header-right-stack { align-items: flex-start; width: 100%; }
@@ -747,37 +754,58 @@ function rtpos_customer_tablet_ui() {
         }
     </style>
 
-    <!-- =====================================================================
-         CLEAN HTML MARKUP (NO INLINE STYLES OR INLINE JS)
-         ===================================================================== -->
     <div class="rt-toast-container" id="rt-toast-box"></div>
     <div class="rt-drawer-backdrop" id="rt-drawer-backdrop"></div>
 
     <div class="rt-wrapper">
         <div class="rt-header">
             <div class="rt-brand-wrap">
-                <button type="button" id="rt-toggle-cat-sidebar" class="rt-sidebar-toggle-btn" title="Show or Hide Food Categories">
+                <button type="button" id="rt-toggle-cat-sidebar" class="rt-sidebar-toggle-btn" title="<?php esc_attr_e('Show or Hide Food Categories', 'antalya-pos'); ?>">
                     <?php echo $svg_sidebar; ?>
                 </button>
 
-                <div class="rt-brand-icon"><?php echo esc_html(substr($s['restaurant_name'], 0, 1)); ?></div>
+                <div class="rt-brand-icon"><?php echo esc_html(mb_substr($restaurant_name, 0, 1)); ?></div>
                 <div>
-                    <h2><?php echo esc_html($s['restaurant_name']); ?></h2>
-                    <div class="rt-header-sub">Welcome to Table #<?php echo esc_html($table_no); ?> (<?php echo $table_seats; ?> Seats)</div>
+                    <h2><?php echo esc_html($restaurant_name); ?></h2>
+                    <div class="rt-header-sub">
+                        <?php
+                        printf(
+                            /* translators: 1: table number, 2: seat count */
+                            esc_html__('Welcome to Table #%1$s (%2$d Seats)', 'antalya-pos'),
+                            esc_html($table_no),
+                            $table_seats
+                        );
+                        ?>
+                    </div>
                 </div>
             </div>
 
             <div class="rt-header-actions">
-                <button type="button" id="rt-toggle-tray-panel" class="rt-tray-toggle-btn" title="View Your Order Cart & Live Food Status">
+                <button type="button" id="rt-toggle-tray-panel" class="rt-tray-toggle-btn" title="<?php esc_attr_e('View Your Order Cart & Live Food Status', 'antalya-pos'); ?>">
                     <?php echo $svg_bag; ?>
-                    <span>Order</span>
+                    <span><?php esc_html_e('Order', 'antalya-pos'); ?></span>
                     <span class="rt-btn-badge" id="rt-header-badge">0</span>
                     <span class="rt-btn-total-pill"><?php echo $cur; ?><span id="rt-header-total">0.00</span></span>
                 </button>
 
-                <button type="button" id="rt-call-waiter-btn" class="rt-waiter-btn" title="Tap to call staff to your table"><?php echo $svg_bell; ?><span>Call Waiter</span></button>
-                <button type="button" id="rt-request-bill-btn" class="rt-bill-btn" disabled title="Available once your order is served"><?php echo $svg_receipt; ?><span>Ask for Bill</span></button>
-                <span class="rt-table-pill"><?php echo $svg_table; ?><span>Table #<?php echo esc_html($table_no); ?></span></span>
+                <button type="button" id="rt-call-waiter-btn" class="rt-waiter-btn" title="<?php esc_attr_e('Tap to call staff to your table', 'antalya-pos'); ?>">
+                    <?php echo $svg_bell; ?><span><?php esc_html_e('Call Waiter', 'antalya-pos'); ?></span>
+                </button>
+                <button type="button" id="rt-request-bill-btn" class="rt-bill-btn" disabled title="<?php esc_attr_e('Available once your order is served', 'antalya-pos'); ?>">
+                    <?php echo $svg_receipt; ?><span><?php esc_html_e('Ask for Bill', 'antalya-pos'); ?></span>
+                </button>
+                <span class="rt-table-pill">
+                    <?php echo $svg_table; ?>
+                    <span>
+                        <?php
+                        printf(
+                            /* translators: %s: table name/number */
+                            esc_html__('Table #%s', 'antalya-pos'),
+                            esc_html($table_no)
+                        );
+                        ?>
+                    </span>
+                </span>
                 <input type="hidden" id="rt-selected-table" value="<?php echo esc_attr($table_no); ?>">
             </div>
         </div>
@@ -786,15 +814,15 @@ function rtpos_customer_tablet_ui() {
             
             <!-- Left Sidebar Categories Menu -->
             <div class="rt-sidebar-cats" id="rt-cat-sidebar">
-                <div class="rt-scat-title">Categories</div>
+                <div class="rt-scat-title"><?php esc_html_e('Categories', 'antalya-pos'); ?></div>
                 <button class="rt-scat-btn active" data-cat="all">
-                    <span class="rt-scat-label-wrap"><?php echo $svg_utensils; ?><span>All Dishes</span></span>
+                    <span class="rt-scat-label-wrap"><?php echo $svg_utensils; ?><span><?php esc_html_e('All Dishes', 'antalya-pos'); ?></span></span>
                     <span class="scnt"><?php echo count($items); ?></span>
                 </button>
                 <?php foreach ($cat_counts as $cat_name => $cnt) : ?>
                     <button class="rt-scat-btn" data-cat="<?php echo esc_attr($cat_name); ?>">
                         <span><?php echo esc_html($cat_name); ?></span>
-                        <span class="scnt"><?php echo $cnt; ?></span>
+                        <span class="scnt"><?php echo intval($cnt); ?></span>
                     </button>
                 <?php endforeach; ?>
             </div>
@@ -804,66 +832,93 @@ function rtpos_customer_tablet_ui() {
                 <div class="rt-toolbar">
                     <div class="rt-search-wrap">
                         <span class="rt-search-icon"><?php echo $svg_search; ?></span>
-                        <input type="text" id="rt-search-input" class="rt-search" placeholder="Type dish name to search (e.g. Burger, Pizza, Drinks)...">
-                        <button type="button" id="rt-search-clear" class="rt-search-clear" title="Clear search"><?php echo $svg_close; ?></button>
+                        <input type="text" id="rt-search-input" class="rt-search" placeholder="<?php esc_attr_e('Type dish name to search (e.g. Burger, Pizza, Drinks)...', 'antalya-pos'); ?>">
+                        <button type="button" id="rt-search-clear" class="rt-search-clear" title="<?php esc_attr_e('Clear search', 'antalya-pos'); ?>"><?php echo $svg_close; ?></button>
                     </div>
                     <div class="rt-quick-guide">
-                        Step 1: Choose dishes &nbsp;•&nbsp; Step 2: Tap <strong>Order</strong> above to send to kitchen
+                        <?php esc_html_e('Step 1: Choose dishes • Step 2: Tap Order above to send to kitchen', 'antalya-pos'); ?>
                     </div>
                 </div>
 
                 <?php if (empty($items)) : ?>
                     <div class="rt-empty-state-box">
-                        <h3>Menu is Being Updated</h3>
-                        <p>Please check back in a moment or tap <strong>"Call Waiter"</strong> above.</p>
+                        <h3><?php esc_html_e('Menu is Being Updated', 'antalya-pos'); ?></h3>
+                        <p>
+                            <?php
+                            printf(
+                                /* translators: %s: Call Waiter button text */
+                                esc_html__('Please check back in a moment or tap "%s" above.', 'antalya-pos'),
+                                esc_html__('Call Waiter', 'antalya-pos')
+                            );
+                            ?>
+                        </p>
                     </div>
                 <?php else : ?>
                     <div class="rt-grid" id="rt-menu-grid">
                         <?php foreach ($items as $item) : 
-                            $item_extra_ids = json_decode($item->extras, true) ?: [];
-                            $base_price     = floatval($item->price);
+                            $item_id        = intval($item->id);
+                            $item_name      = $item->name ?? '';
+                            $item_cat       = $item->category ?? '';
+                            $item_extra_ids = !empty($item->extras) ? json_decode($item->extras, true) : [];
+                            if (!is_array($item_extra_ids)) {
+                                $item_extra_ids = [];
+                            }
+                            $base_price     = floatval($item->price ?? 0);
+                            $img_url        = !empty($item->image_url) ? $item->image_url : 'https://via.placeholder.com/400x280?text=Antalya+Dish';
                         ?>
                             <div class="rt-card"
-                                data-item-id="<?php echo intval($item->id); ?>"
-                                data-cat="<?php echo esc_attr($item->category); ?>"
-                                data-name="<?php echo esc_attr(strtolower($item->name . ' ' . $item->category)); ?>">
+                                data-item-id="<?php echo $item_id; ?>"
+                                data-cat="<?php echo esc_attr($item_cat); ?>"
+                                data-name="<?php echo esc_attr(strtolower($item_name . ' ' . $item_cat)); ?>">
                                 <div>
                                     <div class="rt-img-box">
-                                        <span class="rt-cat-tag"><?php echo esc_html($item->category); ?></span>
+                                        <span class="rt-cat-tag"><?php echo esc_html($item_cat); ?></span>
                                         <span class="rt-in-tray-badge">0 added</span>
-                                        <img src="<?php echo esc_url($item->image_url ?: 'https://via.placeholder.com/400x280?text=Antalya+Dish'); ?>" alt="<?php echo esc_attr($item->name); ?>">
+                                        <img src="<?php echo esc_url($img_url); ?>" alt="<?php echo esc_attr($item_name); ?>">
                                     </div>
-                                    <h4><?php echo esc_html($item->name); ?></h4>
+                                    <h4><?php echo esc_html($item_name); ?></h4>
                                     <div class="price"><?php echo $cur . number_format($base_price, 0); ?></div>
 
                                     <?php if (!empty($item_extra_ids) && !empty($all_extras)) : ?>
                                         <div class="rt-extras-box">
-                                            <div class="rt-extras-hint">Optional Add-ons:</div>
-                                            <?php foreach ($item_extra_ids as $eid) : if (isset($all_extras[$eid])) : $ex = $all_extras[$eid]; ?>
+                                            <div class="rt-extras-hint"><?php esc_html_e('Optional Add-ons:', 'antalya-pos'); ?></div>
+                                            <?php foreach ($item_extra_ids as $eid) : 
+                                                if (isset($all_extras[$eid])) : 
+                                                    $ex = $all_extras[$eid];
+                                                    $ex_name  = $ex->name ?? '';
+                                                    $ex_price = floatval($ex->price ?? 0);
+                                            ?>
                                                 <label class="rt-extra-item">
                                                     <span class="rt-extra-left">
-                                                        <input type="checkbox" class="rt-ex-chk" data-name="<?php echo esc_attr($ex->name); ?>" data-price="<?php echo floatval($ex->price); ?>">
-                                                        <span><?php echo esc_html($ex->name); ?></span>
+                                                        <input type="checkbox" class="rt-ex-chk" data-name="<?php echo esc_attr($ex_name); ?>" data-price="<?php echo $ex_price; ?>">
+                                                        <span><?php echo esc_html($ex_name); ?></span>
                                                     </span>
-                                                    <strong class="rt-extra-price-tag">+<?php echo $cur . number_format($ex->price, 0); ?></strong>
+                                                    <strong class="rt-extra-price-tag">+<?php echo $cur . number_format($ex_price, 0); ?></strong>
                                                 </label>
-                                            <?php endif; endforeach; ?>
+                                            <?php endif; 
+                                            endforeach; ?>
                                         </div>
                                     <?php endif; ?>
                                 </div>
 
                                 <div class="rt-card-actions">
-                                    <div class="rt-card-qty-ctrl" title="Select Quantity">
-                                        <button type="button" class="rt-cq-btn rt-cq-dec" aria-label="Decrease quantity">−</button>
+                                    <div class="rt-card-qty-ctrl" title="<?php esc_attr_e('Select Quantity', 'antalya-pos'); ?>">
+                                        <button type="button" class="rt-cq-btn rt-cq-dec" aria-label="<?php esc_attr_e('Decrease quantity', 'antalya-pos'); ?>">−</button>
                                         <span class="rt-cq-val">1</span>
-                                        <button type="button" class="rt-cq-btn rt-cq-inc" aria-label="Increase quantity">+</button>
+                                        <button type="button" class="rt-cq-btn rt-cq-inc" aria-label="<?php esc_attr_e('Increase quantity', 'antalya-pos'); ?>">+</button>
                                     </div>
                                     <button type="button" class="rt-add"
-                                        data-id="<?php echo $item->id; ?>"
-                                        data-name="<?php echo esc_attr($item->name); ?>"
+                                        data-id="<?php echo $item_id; ?>"
+                                        data-name="<?php echo esc_attr($item_name); ?>"
                                         data-price="<?php echo $base_price; ?>"
                                         data-allowed-extras='<?php echo esc_attr(wp_json_encode(array_map('intval', $item_extra_ids))); ?>'>
-                                        Add • <?php echo $cur . number_format($base_price, 0); ?>
+                                        <?php
+                                        printf(
+                                            /* translators: %s: formatted price */
+                                            esc_html__('Add • %s', 'antalya-pos'),
+                                            $cur . number_format($base_price, 0)
+                                        );
+                                        ?>
                                     </button>
                                 </div>
                             </div>
@@ -871,8 +926,8 @@ function rtpos_customer_tablet_ui() {
                     </div>
 
                     <div id="rt-no-results" class="rt-empty-state-box rt-hidden">
-                        <h3>No Dishes Found</h3>
-                        <p>Try searching with a different word or select <strong>"All Dishes"</strong> on the left.</p>
+                        <h3><?php esc_html_e('No Dishes Found', 'antalya-pos'); ?></h3>
+                        <p><?php esc_html_e('Try searching with a different word or select "All Dishes" on the left.', 'antalya-pos'); ?></p>
                     </div>
                 <?php endif; ?>
             </div>
@@ -882,11 +937,19 @@ function rtpos_customer_tablet_ui() {
                 <div class="rt-panel-top-bar">
                     <strong class="rt-panel-top-title">
                         <?php echo $svg_bag; ?>
-                        <span>Table #<?php echo esc_html($table_no); ?> — Review Order & Live Status</span>
+                        <span>
+                            <?php
+                            printf(
+                                /* translators: %s: table name/number */
+                                esc_html__('Table #%s — Review Order & Live Status', 'antalya-pos'),
+                                esc_html($table_no)
+                            );
+                            ?>
+                        </span>
                     </strong>
-                    <button type="button" id="rt-close-drawer" class="rt-back-menu-btn" title="Return to Food Menu">
+                    <button type="button" id="rt-close-drawer" class="rt-back-menu-btn" title="<?php esc_attr_e('Return to Food Menu', 'antalya-pos'); ?>">
                         <?php echo $svg_close; ?>
-                        <span>Back to Menu</span>
+                        <span><?php esc_html_e('Back to Menu', 'antalya-pos'); ?></span>
                     </button>
                 </div>
 
@@ -894,9 +957,17 @@ function rtpos_customer_tablet_ui() {
                 <div class="rt-box rt-live-tracker" id="rt-live-tracker">
                     <div class="rt-live-tracker-header">
                         <h4 class="rt-live-tracker-title">
-                            <?php echo $svg_radio; ?><span>Live Kitchen Progress</span>
+                            <?php echo $svg_radio; ?><span><?php esc_html_e('Live Kitchen Progress', 'antalya-pos'); ?></span>
                         </h4>
-                        <span class="rt-running-total-pill">Total Ordered: <?php echo $cur; ?><span id="rt-running-bill">0.00</span></span>
+                        <span class="rt-running-total-pill">
+                            <?php
+                            printf(
+                                /* translators: %s: running bill amount */
+                                esc_html__('Total Ordered: %s', 'antalya-pos'),
+                                $cur . '<span id="rt-running-bill">0.00</span>'
+                            );
+                            ?>
+                        </span>
                     </div>
                     <div id="rt-live-orders-list"></div>
                 </div>
@@ -904,56 +975,81 @@ function rtpos_customer_tablet_ui() {
                 <!-- 2. Print-Style Order Receipt Box -->
                 <div class="rt-receipt-box">
                     <div class="rt-rc-head">
-                        <div class="rt-rc-brand"><?php echo esc_html($s['restaurant_name']); ?></div>
-                        <div class="rt-rc-meta">TABLE #<?php echo esc_html($table_no); ?> • YOUR CURRENT TRAY</div>
+                        <div class="rt-rc-brand"><?php echo esc_html($restaurant_name); ?></div>
+                        <div class="rt-rc-meta">
+                            <?php
+                            printf(
+                                /* translators: %s: table name/number */
+                                esc_html__('TABLE #%s • YOUR CURRENT TRAY', 'antalya-pos'),
+                                esc_html($table_no)
+                            );
+                            ?>
+                        </div>
                         <div class="rt-rc-subbar">
-                            <span class="rt-cart-count" id="rt-cart-badge"><span id="rt-item-count">0</span> Item(s) Selected</span>
-                            <button type="button" id="rt-clear-cart" class="rt-clear-btn">Remove All</button>
+                            <span class="rt-cart-count" id="rt-cart-badge"><span id="rt-item-count">0</span> <?php esc_html_e('Item(s) Selected', 'antalya-pos'); ?></span>
+                            <button type="button" id="rt-clear-cart" class="rt-clear-btn"><?php esc_html_e('Remove All', 'antalya-pos'); ?></button>
                         </div>
                     </div>
 
                     <div class="rt-rc-cols">
-                        <span>Selected Dishes</span>
-                        <span>Price</span>
+                        <span><?php esc_html_e('Selected Dishes', 'antalya-pos'); ?></span>
+                        <span><?php esc_html_e('Price', 'antalya-pos'); ?></span>
                     </div>
 
                     <div class="rt-cart-list" id="rt-cart-list">
                         <p class="rt-empty-cart-msg">
-                            Your tray is currently empty.<br>
-                            <small>Tap <strong>"Back to Menu"</strong> and click <strong>"Add"</strong> on any dish you want!</small>
+                            <?php esc_html_e('Your tray is currently empty.', 'antalya-pos'); ?><br>
+                            <small>
+                                <?php
+                                printf(
+                                    /* translators: 1: Back to Menu button, 2: Add button */
+                                    esc_html__('Tap "%1$s" and click "%2$s" on any dish you want!', 'antalya-pos'),
+                                    esc_html__('Back to Menu', 'antalya-pos'),
+                                    esc_html__('Add', 'antalya-pos')
+                                );
+                                ?>
+                            </small>
                         </p>
                     </div>
 
                     <div class="rt-rc-summary">
                         <div class="rt-rc-sum-row">
-                            <span>Subtotal</span>
+                            <span><?php esc_html_e('Subtotal', 'antalya-pos'); ?></span>
                             <span><?php echo $cur; ?><span id="rt-sub">0.00</span></span>
                         </div>
                         <?php if ($tax_rate > 0) : ?>
                             <div class="rt-rc-sum-row">
-                                <span>VAT / Tax (<?php echo $tax_rate; ?>%)</span>
+                                <span>
+                                    <?php
+                                    printf(
+                                        /* translators: %f: tax percentage */
+                                        esc_html__('VAT / Tax (%s%%)', 'antalya-pos'),
+                                        $tax_rate
+                                    );
+                                    ?>
+                                </span>
                                 <span><?php echo $cur; ?><span id="rt-tax">0.00</span></span>
                             </div>
                         <?php endif; ?>
                         <div class="rt-rc-grand-row">
-                            <span>TOTAL TO PAY</span>
+                            <span><?php esc_html_e('TOTAL TO PAY', 'antalya-pos'); ?></span>
                             <span class="rt-rc-grand-amt"><?php echo $cur; ?><span id="rt-total">0.00</span></span>
                         </div>
                     </div>
 
-                    <label class="rt-note-label">Quick Kitchen Preferences (Optional):</label>
+                    <label class="rt-note-label"><?php esc_html_e('Quick Kitchen Preferences (Optional):', 'antalya-pos'); ?></label>
                     <div class="rt-note-chips">
-                        <span class="rt-note-chip" data-note="Less spicy">Less spicy</span>
-                        <span class="rt-note-chip" data-note="Extra spicy">Extra spicy</span>
-                        <span class="rt-note-chip" data-note="No onion">No onion</span>
-                        <span class="rt-note-chip" data-note="Serve together">Serve all together</span>
+                        <span class="rt-note-chip" data-note="Less spicy"><?php esc_html_e('Less spicy', 'antalya-pos'); ?></span>
+                        <span class="rt-note-chip" data-note="Extra spicy"><?php esc_html_e('Extra spicy', 'antalya-pos'); ?></span>
+                        <span class="rt-note-chip" data-note="No onion"><?php esc_html_e('No onion', 'antalya-pos'); ?></span>
+                        <span class="rt-note-chip" data-note="Serve together"><?php esc_html_e('Serve all together', 'antalya-pos'); ?></span>
                     </div>
 
-                    <textarea id="rt-note" class="rt-note-textarea" rows="2" placeholder="Write any special request for the chef here (optional)..."></textarea>
+                    <textarea id="rt-note" class="rt-note-textarea" rows="2" placeholder="<?php esc_attr_e('Write any special request for the chef here (optional)...', 'antalya-pos'); ?>"></textarea>
                     
                     <button class="rt-submit" id="rt-submit-order">
                         <?php echo $svg_send; ?>
-                        <span>SEND ORDER TO KITCHEN</span>
+                        <span><?php esc_html_e('SEND ORDER TO KITCHEN', 'antalya-pos'); ?></span>
                     </button>
                 </div>
             </div>
@@ -962,7 +1058,7 @@ function rtpos_customer_tablet_ui() {
 
     <!-- Mobile Floating Bottom Bar -->
     <div class="rt-mobile-bar" id="rt-open-drawer-btn">
-        <span class="rt-mob-bar-left"><?php echo $svg_bag; ?><span>My Order (<span id="rt-mob-count">0</span>)</span></span>
+        <span class="rt-mob-bar-left"><?php echo $svg_bag; ?><span><?php esc_html_e('My Order', 'antalya-pos'); ?> (<span id="rt-mob-count">0</span>)</span></span>
         <span class="rt-mob-bar-price"><?php echo $cur; ?><span id="rt-mob-total">0.00</span></span>
     </div>
 
@@ -971,13 +1067,13 @@ function rtpos_customer_tablet_ui() {
         <div class="rt-modal">
             <h3 class="rt-modal-title">
                 <span class="rt-modal-sparkle"><?php echo $svg_sparkles; ?></span>
-                <span>Customize Add-ons</span>
+                <span><?php esc_html_e('Customize Add-ons', 'antalya-pos'); ?></span>
             </h3>
             <p id="cem-dish-title" class="rt-modal-subtitle"></p>
             <div id="cem-extras-list" class="rt-modal-scroll"></div>
             <div class="rt-modal-actions">
-                <button type="button" id="cem-save-btn" class="rt-modal-save-btn">Save Changes</button>
-                <button type="button" id="cem-cancel-btn" class="rt-modal-cancel-btn">Cancel</button>
+                <button type="button" id="cem-save-btn" class="rt-modal-save-btn"><?php esc_html_e('Save Changes', 'antalya-pos'); ?></button>
+                <button type="button" id="cem-cancel-btn" class="rt-modal-cancel-btn"><?php esc_html_e('Cancel', 'antalya-pos'); ?></button>
             </div>
         </div>
     </div>
@@ -987,44 +1083,61 @@ function rtpos_customer_tablet_ui() {
         <div class="rt-modal">
             <div class="rt-conf-center">
                 <div class="rt-conf-check-circle"><?php echo $svg_check; ?></div>
-                <h3 class="rt-conf-heading">Order Sent to Kitchen!</h3>
-                <p class="rt-conf-desc">Our chefs have received your order for <strong>Table #<?php echo esc_html($table_no); ?></strong>.</p>
+                <h3 class="rt-conf-heading"><?php esc_html_e('Order Sent to Kitchen!', 'antalya-pos'); ?></h3>
+                <p class="rt-conf-desc">
+                    <?php
+                    printf(
+                        /* translators: %s: table name/number */
+                        esc_html__('Our chefs have received your order for Table #%s.', 'antalya-pos'),
+                        esc_html($table_no)
+                    );
+                    ?>
+                </p>
             </div>
 
             <div class="rt-conf-receipt">
                 <div class="rt-conf-head">
-                    <span id="conf-order-id">Order Summary</span>
+                    <span id="conf-order-id"><?php esc_html_e('Order Summary', 'antalya-pos'); ?></span>
                     <span id="conf-item-count" class="rt-conf-badge-cnt">0 Item(s)</span>
                 </div>
                 <div class="rt-conf-items-scroll" id="conf-items-list"></div>
                 <div id="conf-note-box" class="rt-conf-note"></div>
                 <div class="rt-conf-totals">
-                    <div class="rt-conf-tot-row"><span>Subtotal</span><strong id="conf-sub"></strong></div>
-                    <div id="conf-tax-row" class="rt-conf-tax-row"><span>VAT / Tax (<?php echo $tax_rate; ?>%)</span><strong id="conf-tax"></strong></div>
-                    <div class="rt-conf-grand-row"><span>Total Amount</span><span id="conf-total" class="rt-conf-mono rt-conf-grand-val"></span></div>
+                    <div class="rt-conf-tot-row"><span><?php esc_html_e('Subtotal', 'antalya-pos'); ?></span><strong id="conf-sub"></strong></div>
+                    <div id="conf-tax-row" class="rt-conf-tax-row">
+                        <span>
+                            <?php
+                            printf(
+                                /* translators: %f: tax percentage */
+                                esc_html__('VAT / Tax (%s%%)', 'antalya-pos'),
+                                $tax_rate
+                            );
+                            ?>
+                        </span>
+                        <strong id="conf-tax"></strong>
+                    </div>
+                    <div class="rt-conf-grand-row"><span><?php esc_html_e('Total Amount', 'antalya-pos'); ?></span><span id="conf-total" class="rt-conf-mono rt-conf-grand-val"></span></div>
                 </div>
             </div>
 
             <div class="rt-conf-btn-stack">
-                <button type="button" id="rt-add-another-order-btn" class="rt-conf-more-btn"><?php echo $svg_plus; ?><span>Order More Food</span></button>
-                <button type="button" id="rt-modal-track-btn" class="rt-conf-track-btn">Watch Live Kitchen Status</button>
+                <button type="button" id="rt-add-another-order-btn" class="rt-conf-more-btn"><?php echo $svg_plus; ?><span><?php esc_html_e('Order More Food', 'antalya-pos'); ?></span></button>
+                <button type="button" id="rt-modal-track-btn" class="rt-conf-track-btn"><?php esc_html_e('Watch Live Kitchen Status', 'antalya-pos'); ?></button>
             </div>
         </div>
     </div>
 
-    <!-- =====================================================================
-         SEPARATE JAVASCRIPT BLOCK
-         ===================================================================== -->
+    <!-- JavaScript Block -->
     <script id="rtpos-tablet-scripts">
     jQuery(document).ready(function($) {
-        let ajaxUrl = '<?php echo admin_url('admin-ajax.php'); ?>';
-        let cur = <?php echo json_encode($s['currency']); ?>;
-        let taxRate = <?php echo $tax_rate; ?>;
+        let ajaxUrl = <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>;
+        let cur = <?php echo wp_json_encode($s['currency'] ?? '৳'); ?>;
+        let taxRate = <?php echo floatval($tax_rate); ?>;
         let allExtrasCatalog = <?php echo wp_json_encode($js_all_extras); ?>;
-        let sparklesSvg = <?php echo json_encode($svg_sparkles); ?>;
-        let bellSvg     = <?php echo json_encode($svg_bell); ?>;
-        let receiptSvg  = <?php echo json_encode($svg_receipt); ?>;
-        let sendSvg     = <?php echo json_encode($svg_send); ?>;
+        let sparklesSvg = <?php echo wp_json_encode($svg_sparkles); ?>;
+        let bellSvg     = <?php echo wp_json_encode($svg_bell); ?>;
+        let receiptSvg  = <?php echo wp_json_encode($svg_receipt); ?>;
+        let sendSvg     = <?php echo wp_json_encode($svg_send); ?>;
         let tableKey    = $('#rt-selected-table').val() || 'default';
         let storageKey  = 'rtpos_cart_' + tableKey;
         let waiterLockKey = 'rtpos_waiter_locked_' + tableKey;
@@ -1058,15 +1171,14 @@ function rtpos_customer_tablet_ui() {
             } catch(e) {}
         }
 
-        // Restore Call Waiter Locked State on Reload until Admin Panel Acknowledges
         function setWaiterButtonLocked(isLocked) {
             let btn = $('#rt-call-waiter-btn');
             if (isLocked) {
                 localStorage.setItem(waiterLockKey, '1');
-                btn.prop('disabled', true).html(bellSvg + '<span>Waiting for Staff...</span>');
+                btn.prop('disabled', true).html(bellSvg + '<span>' + <?php echo wp_json_encode(__('Waiting for Staff...', 'antalya-pos')); ?> + '</span>');
             } else {
                 localStorage.removeItem(waiterLockKey);
-                btn.prop('disabled', false).html(bellSvg + '<span>Call Waiter</span>');
+                btn.prop('disabled', false).html(bellSvg + '<span>' + <?php echo wp_json_encode(__('Call Waiter', 'antalya-pos')); ?> + '</span>');
             }
         }
 
@@ -1074,12 +1186,10 @@ function rtpos_customer_tablet_ui() {
             setWaiterButtonLocked(true);
         }
 
-        // Toggle Left Category Sidebar
         $('#rt-toggle-cat-sidebar').on('click', function() {
             $('#rt-cat-sidebar').toggleClass('sidebar-hidden');
         });
 
-        // Combined Toggle Logic: When Order & Live Status is active, hide right side items (#rt-menu-section) completely
         function toggleTrayPanel(forceOpen = null) {
             let panel   = $('#rt-tray-section');
             let menuSec = $('#rt-menu-section');
@@ -1116,15 +1226,14 @@ function rtpos_customer_tablet_ui() {
             if (menuEl) menuEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
 
-        // Call Waiter: Disable until received/cleared in Admin Panel
         $('#rt-call-waiter-btn').on('click', function() {
             let tableNo = $('#rt-selected-table').val();
-            if (!tableNo) return showToast('Table number not found!', 'warn');
+            if (!tableNo) return showToast(<?php echo wp_json_encode(__('Table number not found!', 'antalya-pos')); ?>, 'warn');
             let btn = $(this);
-            btn.prop('disabled', true).text('Calling Staff...');
+            btn.prop('disabled', true).text(<?php echo wp_json_encode(__('Calling Staff...', 'antalya-pos')); ?>);
             $.post(ajaxUrl, { action: 'rtpos_call_waiter', table_no: tableNo }, function(res) {
                 if (res.success) {
-                    showToast('Staff notified! Please wait for assistance at Table #' + tableNo + '.', 'success');
+                    showToast(<?php echo wp_json_encode(__('Staff notified! Please wait for assistance at Table #', 'antalya-pos')); ?> + tableNo + '.', 'success');
                     setWaiterButtonLocked(true);
                 } else {
                     setWaiterButtonLocked(false);
@@ -1134,17 +1243,16 @@ function rtpos_customer_tablet_ui() {
             });
         });
 
-        // Ask for Bill (Enabled only when at least one order is Served)
         $('#rt-request-bill-btn').on('click', function() {
             let tableNo = $('#rt-selected-table').val();
-            if (!tableNo) return showToast('Table number not found!', 'warn');
+            if (!tableNo) return showToast(<?php echo wp_json_encode(__('Table number not found!', 'antalya-pos')); ?>, 'warn');
             let btn = $(this);
-            btn.prop('disabled', true).text('Asking for Bill...');
+            btn.prop('disabled', true).text(<?php echo wp_json_encode(__('Asking for Bill...', 'antalya-pos')); ?>);
             $.post(ajaxUrl, { action: 'rtpos_call_waiter', table_no: tableNo + ' (BILL REQUEST)' }, function(res) {
                 if (res.success) {
-                    showToast('Bill requested! Our staff will bring your receipt shortly.', 'success');
-                    btn.text('Bill Requested!');
-                    setTimeout(() => { btn.prop('disabled', false).html(receiptSvg + '<span>Ask for Bill</span>'); }, 20000);
+                    showToast(<?php echo wp_json_encode(__('Bill requested! Our staff will bring your receipt shortly.', 'antalya-pos')); ?>, 'success');
+                    btn.text(<?php echo wp_json_encode(__('Bill Requested!', 'antalya-pos')); ?>);
+                    setTimeout(() => { btn.prop('disabled', false).html(receiptSvg + '<span>' + <?php echo wp_json_encode(__('Ask for Bill', 'antalya-pos')); ?> + '</span>'); }, 20000);
                 }
             });
         });
@@ -1159,7 +1267,6 @@ function rtpos_customer_tablet_ui() {
             const iconCheckSm  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 
             $.post(ajaxUrl, { action: 'rtpos_get_table_orders', table_no: tableNo }, function(res) {
-                // Unlock Call Waiter button if admin panel has acknowledged/cleared the waiter alert
                 if (res && typeof res.waiter_pending !== 'undefined' && !res.waiter_pending) {
                     if (localStorage.getItem(waiterLockKey) === '1') {
                         setWaiterButtonLocked(false);
@@ -1180,15 +1287,15 @@ function rtpos_customer_tablet_ui() {
 
                         let stepMsgHtml = '';
                         if (o.status === 'pending') {
-                            stepMsgHtml = `<div class="rt-step-msg-box msg-pending"><span class="rt-pulse-dot rt-pulse-blue"></span><span>We received your order! Our kitchen will start preparing it soon.</span></div>`;
+                            stepMsgHtml = `<div class="rt-step-msg-box msg-pending"><span class="rt-pulse-dot rt-pulse-blue"></span><span>` + <?php echo wp_json_encode(__('We received your order! Our kitchen will start preparing it soon.', 'antalya-pos')); ?> + `</span></div>`;
                         } else if (o.status === 'preparing') {
-                            stepMsgHtml = `<div class="rt-step-msg-box msg-preparing"><span class="rt-pulse-dot rt-pulse-orange"></span><span>Cooking now! Our chef is preparing your fresh meal.</span></div>`;
+                            stepMsgHtml = `<div class="rt-step-msg-box msg-preparing"><span class="rt-pulse-dot rt-pulse-orange"></span><span>` + <?php echo wp_json_encode(__('Cooking now! Our chef is preparing your fresh meal.', 'antalya-pos')); ?> + `</span></div>`;
                         } else {
-                            stepMsgHtml = `<div class="rt-step-msg-box msg-served"><span class="rt-served-check">${iconCheckSm}</span><span>Served at your table! Enjoy your meal.</span></div>`;
+                            stepMsgHtml = `<div class="rt-step-msg-box msg-served"><span class="rt-served-check">${iconCheckSm}</span><span>` + <?php echo wp_json_encode(__('Served at your table! Enjoy your meal.', 'antalya-pos')); ?> + `</span></div>`;
                         }
 
-                        let roundLabel = res.data.length > 1 ? `Order #${index + 1} • ` : '';
-                        let timeStr = o.time ? ` (${o.time})` : '';
+                        let roundLabel = res.data.length > 1 ? (`Order #${index + 1} • `) : '';
+                        let timeStr = o.time ? (' (' + o.time + ')') : '';
 
                         let breakdownHtml = '';
                         if (Array.isArray(o.items_detail) && o.items_detail.length > 0) {
@@ -1236,7 +1343,6 @@ function rtpos_customer_tablet_ui() {
                             </div>`;
                     });
 
-                    // Enable "Ask for Bill" ONLY if at least one order has been Served
                     let billBtn = $('#rt-request-bill-btn');
                     if (hasServedOrder) {
                         if (billBtn.text().indexOf('Requested') === -1 && billBtn.text().indexOf('Asking') === -1) {
@@ -1266,7 +1372,7 @@ function rtpos_customer_tablet_ui() {
 
             $('.rt-card').each(function() {
                 let matchCat = (activeCategory === 'all') || ($(this).data('cat') === activeCategory);
-                let matchText = $(this).data('name').indexOf(q) > -1;
+                let matchText = String($(this).data('name') || '').indexOf(q) > -1;
                 let show = matchCat && matchText;
                 $(this).toggle(show);
                 if (show) visibleCount++;
@@ -1291,7 +1397,6 @@ function rtpos_customer_tablet_ui() {
             filterMenuCards();
         });
 
-        // Helper to update Card Button Price dynamically with Qty & Extras
         function updateCardButtonPrice(card) {
             let btn       = card.find('.rt-add');
             let basePrice = parseFloat(btn.data('price')) || 0;
@@ -1306,7 +1411,6 @@ function rtpos_customer_tablet_ui() {
             btn.text('Add • ' + cur + totalUnit.toFixed(0));
         }
 
-        // Card Quantity Selector Increment / Decrement
         $(document).on('click', '.rt-cq-inc', function() {
             let card  = $(this).closest('.rt-card');
             let valEl = card.find('.rt-cq-val');
@@ -1355,7 +1459,6 @@ function rtpos_customer_tablet_ui() {
                 extraCost += parseFloat($(this).data('price')) || 0;
             });
 
-            // Reset card checkboxes & quantity back to 1
             card.find('.rt-ex-chk').prop('checked', false);
             card.find('.rt-cq-val').text('1');
             btn.text('Add • ' + cur + basePrice.toFixed(0));
@@ -1378,7 +1481,7 @@ function rtpos_customer_tablet_ui() {
 
             let html = '', subTotal = 0, totalQty = 0;
             if (cart.length === 0) {
-                $('#rt-cart-list').html('<p class="rt-empty-cart-msg">Your tray is currently empty.<br><small>Tap <strong>"Back to Menu"</strong> and click <strong>"Add"</strong> on any dish you want!</small></p>');
+                $('#rt-cart-list').html('<p class="rt-empty-cart-msg">' + <?php echo wp_json_encode(__('Your tray is currently empty.<br><small>Tap <strong>"Back to Menu"</strong> and click <strong>"Add"</strong> on any dish you want!</small>', 'antalya-pos')); ?> + '</p>');
                 $('#rt-sub, #rt-tax, #rt-total, #rt-mob-total, #rt-header-total').text('0.00');
                 $('#rt-item-count, #rt-mob-count, #rt-header-badge').text('0');
                 $('#rt-clear-cart').hide();
@@ -1515,7 +1618,7 @@ function rtpos_customer_tablet_ui() {
         updateCartUI();
 
         $('#rt-clear-cart').on('click', function() {
-            if (confirm('Remove all selected dishes from your tray?')) { cart = []; updateCartUI(); }
+            if (confirm(<?php echo wp_json_encode(__('Remove all selected dishes from your tray?', 'antalya-pos')); ?>)) { cart = []; updateCartUI(); }
         });
 
         $(document).on('click', '.rt-inc', function() { cart[$(this).data('idx')].qty++; updateCartUI(); });
@@ -1529,14 +1632,14 @@ function rtpos_customer_tablet_ui() {
             let chip = $(this).data('note');
             let curNote = $('#rt-note').val().trim();
             if (curNote.indexOf(chip) === -1) {
-                $('#rt-note').val(curNote ? curNote + ', ' + chip : chip);
+                $('#rt-note').val(curNote ? (curNote + ', ' + chip) : chip);
             }
         });
 
         $('#rt-submit-order').on('click', function() {
             let tableNo = $('#rt-selected-table').val();
-            if (!tableNo) return showToast('Table number is missing!', 'warn');
-            if (cart.length === 0) return showToast('Your tray is empty! Please add at least one dish first.', 'warn');
+            if (!tableNo) return showToast(<?php echo wp_json_encode(__('Table number is missing!', 'antalya-pos')); ?>, 'warn');
+            if (cart.length === 0) return showToast(<?php echo wp_json_encode(__('Your tray is empty! Please add at least one dish first.', 'antalya-pos')); ?>, 'warn');
 
             let submittedCart = JSON.parse(JSON.stringify(cart));
             let subStr = $('#rt-sub').text();
@@ -1545,7 +1648,7 @@ function rtpos_customer_tablet_ui() {
             let noteStr = $('#rt-note').val().trim();
 
             let btn = $(this);
-            btn.prop('disabled', true).text('Sending to Kitchen...');
+            btn.prop('disabled', true).text(<?php echo wp_json_encode(__('Sending to Kitchen...', 'antalya-pos')); ?>);
 
             $.post(ajaxUrl, {
                 action: 'rtpos_place_order',
@@ -1561,7 +1664,7 @@ function rtpos_customer_tablet_ui() {
                     let totalItemsCount = 0, confHtml = '';
 
                     submittedCart.forEach(item => {
-                        let qty = intval(item.qty) || 1;
+                        let qty = parseInt(item.qty) || 1;
                         let unitPrice = parseFloat(item.unitPrice) || 0;
                         let lineTotal = (unitPrice * qty).toFixed(2);
                         totalItemsCount += qty;
@@ -1590,7 +1693,7 @@ function rtpos_customer_tablet_ui() {
                             </div>`;
                     });
 
-                    $('#conf-order-id').text(orderId ? 'Ticket #' + orderId : 'Order Summary');
+                    $('#conf-order-id').text(orderId ? ('Ticket #' + orderId) : 'Order Summary');
                     $('#conf-item-count').text(totalItemsCount + ' Item(s)');
                     $('#conf-items-list').html(confHtml);
                     $('#conf-sub').text(cur + subStr);
@@ -1610,9 +1713,9 @@ function rtpos_customer_tablet_ui() {
                     $('#rt-success-modal').css('display', 'flex').hide().fadeIn(200);
                     pollTableOrderStatus();
                 } else {
-                    showToast('Could not send order. Please try again.', 'warn');
+                    showToast(<?php echo wp_json_encode(__('Could not send order. Please try again.', 'antalya-pos')); ?>, 'warn');
                 }
-                btn.prop('disabled', false).html(sendSvg + '<span>SEND ORDER TO KITCHEN</span>');
+                btn.prop('disabled', false).html(sendSvg + '<span>' + <?php echo wp_json_encode(__('SEND ORDER TO KITCHEN', 'antalya-pos')); ?> + '</span>');
             });
         });
     });
