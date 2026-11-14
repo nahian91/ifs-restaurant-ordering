@@ -9,6 +9,8 @@ $svg_plus     = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" str
 $svg_check    = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 $svg_close    = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
 $svg_order    = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>';
+$svg_file     = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
+$svg_ratio    = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M6 12h12"/></svg>';
 ?>
 
 <div class="apos-card apos-full-card">
@@ -40,8 +42,8 @@ $svg_order    = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" str
             </div>
         </div>
 
-        <div class="itm-form-grid-bot">
-            <div class="apos-form-group">
+        <div class="itm-form-grid-bot" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+            <div class="apos-form-group" style="margin: 0;">
                 <label class="apos-label">Price <span>*</span></label>
                 <div class="apos-input-wrap">
                     <span class="apos-input-prefix"><?php echo $cur; ?></span>
@@ -49,12 +51,29 @@ $svg_order    = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" str
                 </div>
             </div>
 
-            <div class="apos-form-group">
-                <label class="apos-label">Display Order / Number <small>(Lower numbers appear first)</small></label>
+            <div class="apos-form-group" style="margin: 0;">
+                <label class="apos-label">Portion / Ratio <small>(Optional)</small></label>
+                <div class="apos-input-wrap">
+                    <span class="apos-input-prefix"><?php echo $svg_ratio; ?></span>
+                    <input type="text" name="item_ratio" class="apos-input has-prefix" placeholder="e.g. 1:1, 1:2, 1:4" value="<?php echo ($edit_item && isset($edit_item->ratio)) ? esc_attr($edit_item->ratio) : ''; ?>">
+                </div>
+            </div>
+
+            <div class="apos-form-group" style="margin: 0;">
+                <label class="apos-label">Display Order / Number <small>(Lower first)</small></label>
                 <div class="apos-input-wrap">
                     <span class="apos-input-prefix"><?php echo $svg_order; ?></span>
                     <input type="number" name="item_order" class="apos-input has-prefix" placeholder="0" value="<?php echo $edit_item && isset($edit_item->item_order) ? intval($edit_item->item_order) : '0'; ?>">
                 </div>
+            </div>
+        </div>
+
+        <!-- Short Description / Ingredients Field -->
+        <div class="apos-form-group" style="margin-top: 20px;">
+            <label class="apos-label">Short Description / Ingredients <small>(Optional)</small></label>
+            <div class="apos-input-wrap">
+                <span class="apos-input-prefix" style="align-items: flex-start; padding-top: 12px;"><?php echo $svg_file; ?></span>
+                <textarea name="item_description" class="apos-input has-prefix" rows="3" placeholder="e.g. Minced lamb meat, red bell peppers, special Turkish spices..." style="resize: vertical; padding-top: 10px;"><?php echo ($edit_item && isset($edit_item->description)) ? esc_textarea($edit_item->description) : ''; ?></textarea>
             </div>
         </div>
 
@@ -209,7 +228,7 @@ jQuery(document).ready(function($) {
                             <span class="apos-slider"></span>
                         </div>
                     </label>`;
-                $('#rt-extras-grid').append(switchHtml);
+                $('#rtpos-extras-grid').append(switchHtml);
                 $('#q-ex-name, #q-ex-price').val('');
                 $('#rtpos-quick-ex-box').slideUp(150);
             }

@@ -30,13 +30,16 @@ $svg_trash       = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" 
                     <th style="padding: 16px 14px;">Item Name</th>
                     <th class="col-itm-cat" style="padding: 16px 14px;">Category</th>
                     <th class="col-itm-price" style="padding: 16px 14px;">Price</th>
+                    <th class="col-itm-avail" style="padding: 16px 14px; text-align: center;">Availability</th>
                     <th class="col-itm-act" style="padding: 16px 20px; text-align: right;">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($items as $item) : 
-                    $img_src     = $item->image_url ?: 'https://via.placeholder.com/150?text=Dish';
-                    $item_order  = isset($item->item_order) ? intval($item->item_order) : 0;
+                    $img_src    = $item->image_url ?: 'https://via.placeholder.com/150?text=Dish';
+                    $item_order = isset($item->item_order) ? intval($item->item_order) : 0;
+                    // Default available is 1 (Active/In Stock) if column not set
+                    $is_avail   = isset($item->is_available) ? intval($item->is_available) : 1;
                 ?>
                 <tr class="itm-row" data-name="<?php echo esc_attr(strtolower($item->name)); ?>" data-cat="<?php echo esc_attr(strtolower($item->category)); ?>" style="transition: background 0.15s ease;">
                     <td style="padding: 14px 14px; vertical-align: middle; text-align: center;">
@@ -57,6 +60,13 @@ $svg_trash       = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" 
                     </td>
                     <td style="padding: 14px 14px; vertical-align: middle;">
                         <strong class="itm-price-val"><?php echo $cur . number_format($item->price, 2); ?></strong>
+                    </td>
+                    <!-- Availability Switch Column -->
+                    <td style="padding: 14px 14px; vertical-align: middle; text-align: center;">
+                        <label class="apos-switch" title="Toggle Availability">
+                            <input type="checkbox" class="rtpos-toggle-avail" data-id="<?php echo intval($item->id); ?>" <?php checked($is_avail, 1); ?>>
+                            <span class="apos-slider"></span>
+                        </label>
                     </td>
                     <td style="padding: 14px 20px; vertical-align: middle; text-align: right;">
                         <div class="itm-act-group" style="justify-content: flex-end;">
@@ -84,9 +94,10 @@ $svg_trash       = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" 
 <style>
     .col-itm-order { width: 70px; }
     .col-itm-photo { width: 90px; }
-    .col-itm-cat { width: 200px; }
-    .col-itm-price { width: 150px; }
-    .col-itm-act { width: 250px; }
+    .col-itm-cat { width: 170px; }
+    .col-itm-price { width: 130px; }
+    .col-itm-avail { width: 120px; }
+    .col-itm-act { width: 230px; }
 
     .itm-order-badge {
         background: #f8fafc; color: #475569; border: 1px solid #cbd5e1;
@@ -110,6 +121,24 @@ $svg_trash       = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" 
         font-size: 12px; font-weight: 700; display: inline-block;
     }
     .itm-price-val { font-size: 15.5px; color: #0f172a; font-family: 'Courier New', Courier, monospace; }
+
+    /* iOS Style Toggle Switch Styles */
+    .apos-switch {
+        position: relative; display: inline-block; width: 38px; height: 22px; vertical-align: middle;
+    }
+    .apos-switch input { opacity: 0; width: 0; height: 0; }
+    .apos-slider {
+        position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+        background-color: #cbd5e1; transition: .2s cubic-bezier(0.16, 1, 0.3, 1); border-radius: 22px;
+    }
+    .apos-slider:before {
+        position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px;
+        background-color: white; transition: .2s cubic-bezier(0.16, 1, 0.3, 1); border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+    }
+    .apos-switch input:checked + .apos-slider { background-color: #10b981; }
+    .apos-switch input:focus + .apos-slider { box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15); }
+    .apos-switch input:checked + .apos-slider:before { transform: translateX(16px); }
 
     .itm-act-group { display: flex; gap: 6px; align-items: center; }
     .itm-act-btn {
@@ -146,8 +175,20 @@ jQuery(document).ready(function($) {
         }
     });
 
+    // AJAX Handler for Live Availability Toggle
+    $(document).on('change', '.rtpos-toggle-avail', function() {
+        let itemId = $(this).data('id');
+        let isAvail = $(this).is(':checked') ? 1 : 0;
+        
+        $.post(ajaxurl, {
+            action: 'rtpos_toggle_item_availability',
+            id: itemId,
+            available: isAvail
+        });
+    });
+
     function filterItems() {
-        let q  = ($('#itm-live-search').val() || '').toLowerCase();
+        let q   = ($('#itm-live-search').val() || '').toLowerCase();
         let cat = ($('#itm-cat-filter').val() || 'all').toLowerCase();
 
         $('.itm-row').each(function() {

@@ -17,7 +17,7 @@ function rtpos_handle_order_status_update($orders_table) {
 }
 
 /**
- * Handle Full Order Edit Form Submission
+ * Handle Full Order Edit Form Submission (Quantities + New Items + Removal)
  */
 function rtpos_handle_full_order_edit($orders_table, $s) {
     global $wpdb;
@@ -47,9 +47,13 @@ function rtpos_handle_full_order_edit($orders_table, $s) {
     $new_items = array();
     $subtotal  = 0;
 
-    // Recalculate items based on submitted quantities
+    // 1. Process Existing Items (Quantities & Removals via Delete Icon Flag)
     if (isset($_POST['item_qty']) && is_array($_POST['item_qty'])) {
         foreach ($_POST['item_qty'] as $index => $q) {
+            if (isset($_POST['remove_item'][$index]) && $_POST['remove_item'][$index] == '1') {
+                continue; // Skip/Remove this item
+            }
+
             if (isset($items_raw[$index])) {
                 $item = $items_raw[$index];
                 $qty  = max(1, intval($q));
@@ -67,9 +71,33 @@ function rtpos_handle_full_order_edit($orders_table, $s) {
                 $subtotal += ($unit * $qty);
             }
         }
-    } else {
-        $new_items = $items_raw;
-        $subtotal  = floatval($existing->subtotal);
+    }
+
+    // 2. Process Newly Added Items Loaded from Menu Items Table
+    if (isset($_POST['new_item_id']) && is_array($_POST['new_item_id'])) {
+        $t_items = $wpdb->prefix . 'rtpos_items';
+        foreach ($_POST['new_item_id'] as $key => $item_id) {
+            $item_id = intval($item_id);
+            if ($item_id <= 0) continue;
+
+            $new_qty = max(1, intval($_POST['new_item_qty'][$key] ?? 1));
+            $db_item = $wpdb->get_row($wpdb->prepare("SELECT * FROM $t_items WHERE id = %d", $item_id));
+
+            if ($db_item) {
+                $item_name  = $db_item->item_name ?? $db_item->name ?? 'Dish';
+                $unit_price = floatval($db_item->price ?? 0);
+                
+                $new_items[] = array(
+                    'id'        => $db_item->id,
+                    'name'      => $item_name,
+                    'unitPrice' => $unit_price,
+                    'price'     => $unit_price,
+                    'qty'       => $new_qty,
+                    'extras'    => array()
+                );
+                $subtotal += ($unit_price * $new_qty);
+            }
+        }
     }
 
     // Calculate Tax & Grand Total
@@ -93,7 +121,7 @@ function rtpos_handle_full_order_edit($orders_table, $s) {
 }
 
 /**
- * Render Full Edit Order Form UI
+ * Render Full Edit Order Form UI with Add/Remove Item Support
  */
 function rtpos_render_order_edit_form($view_order, $s) {
     global $wpdb;
@@ -106,8 +134,14 @@ function rtpos_render_order_edit_form($view_order, $s) {
     $t_tables   = $wpdb->prefix . 'rtpos_tables';
     $all_tables = $wpdb->get_results("SELECT table_name FROM $t_tables ORDER BY id ASC") ?: array();
 
+    // Fetch active restaurant menu items from items table for dropdown loading
+    $t_items    = $wpdb->prefix . 'rtpos_items';
+    $menu_items = $wpdb->get_results("SELECT * FROM $t_items ORDER BY id DESC") ?: array();
+
     $svg_save   = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
     $svg_back   = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>';
+    $svg_plus   = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+    $svg_trash  = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>';
     ?>
     <div class="apos-card apos-full-card">
         <div class="ord-view-header">
@@ -156,15 +190,16 @@ function rtpos_render_order_edit_form($view_order, $s) {
                 </div>
             </div>
 
-            <h3 style="font-size:16px; font-weight:800; color:#0f172a; margin:20px 0 10px;">Edit Item Quantities</h3>
+            <h3 style="font-size:16px; font-weight:800; color:#0f172a; margin:25px 0 10px;">Existing Order Items</h3>
             <table class="apos-table apos-full-table" style="box-shadow:none; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
                 <thead>
                     <tr>
                         <th>Dish / Item Name</th>
                         <th>Selected Add-ons</th>
-                        <th width="140">Unit Price</th>
-                        <th width="120">Quantity</th>
-                        <th width="140" style="text-align:right;">Subtotal</th>
+                        <th width="130">Unit Price</th>
+                        <th width="110">Quantity</th>
+                        <th width="130" style="text-align:right;">Subtotal</th>
+                        <th width="80" style="text-align:center;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -173,7 +208,7 @@ function rtpos_render_order_edit_form($view_order, $s) {
                         $qty     = intval($vi['qty'] ?? 1);
                         $l_tot   = $u_price * $qty;
                     ?>
-                    <tr>
+                    <tr class="rtpos-existing-item-row">
                         <td><strong><?php echo esc_html($vi['name']); ?></strong></td>
                         <td>
                             <?php if (!empty($vi['extras'])) : ?>
@@ -184,22 +219,98 @@ function rtpos_render_order_edit_form($view_order, $s) {
                         </td>
                         <td><?php echo $cur . number_format($u_price, 2); ?></td>
                         <td>
-                            <input type="number" name="item_qty[<?php echo $idx; ?>]" value="<?php echo $qty; ?>" min="1" max="99" class="apos-input" style="padding:6px 10px; width:75px; font-weight:800; text-align:center;">
+                            <input type="number" name="item_qty[<?php echo $idx; ?>]" value="<?php echo $qty; ?>" min="1" max="99" class="apos-input rtpos-item-qty-input" style="padding:6px 10px; width:70px; font-weight:800; text-align:center;">
                         </td>
                         <td style="text-align:right;"><strong><?php echo $cur . number_format($l_tot, 2); ?></strong></td>
+                        <td style="text-align:center;">
+                            <input type="hidden" name="remove_item[<?php echo $idx; ?>]" class="rtpos-remove-flag" value="0">
+                            <button type="button" class="rtpos-delete-item-btn" title="Remove this item" style="background:#fef2f2; color:#dc2626; border:1px solid #fee2e2; padding:7px; border-radius:8px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:0.2s;">
+                                <?php echo $svg_trash; ?>
+                            </button>
+                        </td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
 
-            <div style="margin-top:22px; padding-top:16px; border-top:1px solid #f1f5f9; display:flex; gap:10px;">
-                <button type="submit" name="rtpos_save_order_edit" class="apos-btn" style="display:inline-flex; align-items:center; gap:7px; padding:11px 20px;">
+            <!-- Add New Items Section -->
+            <h3 style="font-size:16px; font-weight:800; color:#0f172a; margin:30px 0 10px;">Add New Dishes from Menu</h3>
+            <div id="rtpos-new-items-container" style="display:flex; flex-direction:column; gap:10px; margin-bottom:15px;"></div>
+            
+            <button type="button" id="rtpos-add-row-btn" class="apos-btn-secondary" style="display:inline-flex; align-items:center; gap:6px; font-weight:700;">
+                <?php echo $svg_plus; ?>
+                <span>+ Add Another Dish</span>
+            </button>
+
+            <div style="margin-top:30px; padding-top:20px; border-top:1.5px solid #e2e8f0; display:flex; gap:12px;">
+                <button type="submit" name="rtpos_save_order_edit" class="apos-btn" style="display:inline-flex; align-items:center; gap:7px; padding:12px 24px; font-size:15px;">
                     <?php echo $svg_save; ?>
                     <span>Save Order Changes</span>
                 </button>
-                <a href="?page=antalya-pos&tab=orders&view_order=<?php echo intval($view_order->id); ?>" class="apos-btn-secondary" style="padding:11px 20px;">Cancel</a>
+                <a href="?page=antalya-pos&tab=orders&view_order=<?php echo intval($view_order->id); ?>" class="apos-btn-secondary" style="padding:12px 24px; font-size:15px;">Cancel</a>
             </div>
         </form>
     </div>
+
+    <style>
+        .rtpos-existing-item-row.row-removed {
+            opacity: 0.35;
+            background: #f8fafc;
+            text-decoration: line-through;
+        }
+        .rtpos-delete-item-btn:hover {
+            background: #fee2e2 !important;
+            transform: scale(1.05);
+        }
+    </style>
+
+    <!-- JavaScript for Delete Icon & Dynamic Item Loading from Database -->
+    <script>
+    jQuery(document).ready(function($) {
+        let menuItemsOptions = '<option value="">-- Select Dish from Menu --</option>';
+        <?php foreach ($menu_items as $mi) : 
+            $m_name  = $mi->item_name ?? $mi->name ?? 'Item';
+            $m_price = floatval($mi->price ?? 0);
+        ?>
+            menuItemsOptions += '<option value="<?php echo intval($mi->id); ?>"><?php echo esc_js($m_name); ?> (<?php echo $cur . number_format($m_price, 2); ?>)</option>';
+        <?php endforeach; ?>
+
+        // Toggle Remove Row visually when delete icon is clicked
+        $(document).on('click', '.rtpos-delete-item-btn', function() {
+            let row = $(this).closest('.rtpos-existing-item-row');
+            let flagInput = row.find('.rtpos-remove-flag');
+            
+            if (flagInput.val() === '0') {
+                flagInput.val('1');
+                row.addClass('row-removed');
+                row.find('.rtpos-item-qty-input').prop('disabled', true);
+                $(this).css('background', '#dc2626').css('color', '#fff');
+            } else {
+                flagInput.val('0');
+                row.removeClass('row-removed');
+                row.find('.rtpos-item-qty-input').prop('disabled', false);
+                $(this).css('background', '#fef2f2').css('color', '#dc2626');
+            }
+        });
+
+        // Add new item row dynamically loaded from items table options
+        $('#rtpos-add-row-btn').on('click', function() {
+            let rowHtml = `
+                <div class="rtpos-new-item-row" style="display:flex; gap:12px; align-items:center; background:#f8fafc; padding:12px; border:1px solid #cbd5e1; border-radius:12px;">
+                    <select name="new_item_id[]" class="apos-input" style="flex:2; margin:0;" required>
+                        ${menuItemsOptions}
+                    </select>
+                    <input type="number" name="new_item_qty[]" value="1" min="1" max="99" class="apos-input" style="width:90px; margin:0; text-align:center; font-weight:800;" placeholder="Qty">
+                    <button type="button" class="rtpos-remove-new-row" style="background:#fee2e2; color:#dc2626; border:none; padding:8px 12px; border-radius:8px; font-weight:700; cursor:pointer;">Remove</button>
+                </div>
+            `;
+            $('#rtpos-new-items-container').append(rowHtml);
+        });
+
+        $(document).on('click', '.rtpos-remove-new-row', function() {
+            $(this).closest('.rtpos-new-item-row').remove();
+        });
+    });
+    </script>
     <?php
 }

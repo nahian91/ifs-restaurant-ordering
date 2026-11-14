@@ -87,38 +87,18 @@ function rtpos_render_standalone_admin() {
         .apos-content-wrap { margin-left: 260px; flex: 1; display: flex; flex-direction: column; min-width: 0; transition: margin-left 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
         .apos-content-wrap.sidebar-hidden { margin-left: 0 !important; }
 
-        /* Fixed Toggle Button at Bottom-Left Corner (Always Visible) */
+        /* Professional Fixed Toggle Button with Visible Text & Dynamic Icon */
         .apos-sidebar-toggle {
             position: fixed; bottom: 20px; left: 20px;
             background: #1e293b; border: 1.5px solid #334155; color: #f8fafc;
-            width: 45px; height: 45px; border-radius: 12px; display: inline-flex;
-            align-items: center; justify-content: center; cursor: pointer; transition: all 0.18s ease;
+            padding: 0 14px; height: 45px; border-radius: 12px; display: inline-flex;
+            align-items: center; gap: 8px; cursor: pointer; transition: all 0.18s ease;
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); z-index: 100000;
+            font-size: 13px; font-weight: 800; letter-spacing: 0.3px;
         }
         .apos-sidebar-toggle:hover { 
             background: #f97316; border-color: #f97316; color: #fff; 
-            transform: scale(1.05);
-        }
-        .apos-sidebar-toggle::after {
-            content: "Toggle Menu";
-            position: absolute;
-            left: 55px;
-            background: #0f172a;
-            color: #fff;
-            padding: 6px 12px;
-            border-radius: 8px;
-            font-size: 12px;
-            font-weight: 700;
-            white-space: nowrap;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.2s ease, visibility 0.2s ease;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-            pointer-events: none;
-        }
-        .apos-sidebar-toggle:hover::after {
-            opacity: 1;
-            visibility: visible;
+            transform: translateY(-1px);
         }
 
         .pulse-dot { height: 8px; width: 8px; background-color: #10b981; border-radius: 50%; display: inline-block; margin-right: 8px; animation: pulse 2s infinite; }
@@ -188,13 +168,13 @@ function rtpos_render_standalone_admin() {
     </style>
 
     <div class="apos-shell">
-        <!-- Sidebar Toggle Button Fixed at Bottom-Left Corner Outside Sidebar (Always Visible) -->
-        <button type="button" id="apos-toggle-sidebar" class="apos-sidebar-toggle" title="Show/Hide Menu">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="3" y1="12" x2="21" y2="12"></line>
-                <line x1="3" y1="6" x2="21" y2="6"></line>
-                <line x1="3" y1="18" x2="21" y2="18"></line>
-            </svg>
+        <!-- Sidebar Toggle Button with Text and Dynamic Icon -->
+        <button type="button" id="apos-toggle-sidebar" class="apos-sidebar-toggle" title="Toggle Menu">
+            <span id="toggle-icon-wrap">
+                <svg id="icon-close" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                <svg id="icon-menu" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            </span>
+            <span id="toggle-text">Hide Menu</span>
         </button>
 
         <aside class="apos-sidebar" id="apos-sidebar">
@@ -249,17 +229,33 @@ function rtpos_render_standalone_admin() {
 
     <script>
     jQuery(document).ready(function($) {
+        function updateToggleUI(isHidden) {
+            if (isHidden) {
+                $('#icon-close').hide();
+                $('#icon-menu').show();
+                $('#toggle-text').text('Show Menu');
+            } else {
+                $('#icon-menu').hide();
+                $('#icon-close').show();
+                $('#toggle-text').text('Hide Menu');
+            }
+        }
+
         // Restore Sidebar Hidden State from LocalStorage
         if (localStorage.getItem('apos_sidebar_hidden') === '1') {
             $('#apos-sidebar').addClass('sidebar-hidden');
             $('#apos-content-wrap').addClass('sidebar-hidden');
+            updateToggleUI(true);
+        } else {
+            updateToggleUI(false);
         }
 
         $(document).on('click', '#apos-toggle-sidebar', function() {
             $('#apos-sidebar').toggleClass('sidebar-hidden');
             $('#apos-content-wrap').toggleClass('sidebar-hidden');
-            let isHidden = $('#apos-sidebar').hasClass('sidebar-hidden') ? '1' : '0';
-            localStorage.setItem('apos_sidebar_hidden', isHidden);
+            let isHidden = $('#apos-sidebar').hasClass('sidebar-hidden');
+            localStorage.setItem('apos_sidebar_hidden', isHidden ? '1' : '0');
+            updateToggleUI(isHidden);
         });
 
         let lastCallCount = 0;

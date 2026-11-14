@@ -1,7 +1,7 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
-define('RTPOS_DB_VERSION', '6.1');
+define('RTPOS_DB_VERSION', '6.2');
 
 /**
  * Install & Upgrade POS Database Tables
@@ -32,6 +32,8 @@ function rtpos_install_db() {
     $sql2 = "CREATE TABLE $t_cats (
         id mediumint(9) NOT NULL AUTO_INCREMENT,
         name varchar(100) NOT NULL,
+        category_order int(5) NOT NULL DEFAULT 0,
+        image text,
         PRIMARY KEY (id)
     ) $charset;";
 
@@ -39,6 +41,7 @@ function rtpos_install_db() {
         id mediumint(9) NOT NULL AUTO_INCREMENT,
         name varchar(100) NOT NULL,
         price decimal(10,2) NOT NULL DEFAULT 0.00,
+        image text,
         PRIMARY KEY (id)
     ) $charset;";
 
@@ -63,9 +66,13 @@ function rtpos_install_db() {
         id mediumint(9) NOT NULL AUTO_INCREMENT,
         name varchar(100) NOT NULL,
         role varchar(50) NOT NULL,
+        email varchar(150) NOT NULL,
+        password varchar(255) NOT NULL,
         phone varchar(30),
         status varchar(20) NOT NULL DEFAULT 'Active',
-        PRIMARY KEY (id)
+        permissions longtext,
+        PRIMARY KEY (id),
+        KEY email (email)
     ) $charset;";
 
     $sql6 = "CREATE TABLE $t_tables (
@@ -108,8 +115,9 @@ function rtpos_install_db() {
 
     // Seed Default Categories if Empty
     if ((int) $wpdb->get_var("SELECT COUNT(*) FROM $t_cats") === 0) {
+        $c_order = 1;
         foreach (['Starters', 'Main Course', 'Drinks'] as $cat) {
-            $wpdb->insert($t_cats, ['name' => $cat]);
+            $wpdb->insert($t_cats, ['name' => $cat, 'category_order' => $c_order++]);
         }
     }
 
